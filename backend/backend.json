@@ -1,0 +1,80 @@
+{
+  "uuid": "d481e9ad-e013-40e6-ba28-41becd5138af",
+  "lastMigration": 32,
+  "name": "Backend",
+  "endpointPrefix": "",
+  "latency": 0,
+  "port": 3001,
+  "hostname": "",
+  "folders": [],
+  "routes": [
+    {
+      "uuid": "67ef5a9a-b276-4dcc-b8bb-8953150094a5",
+      "type": "http",
+      "documentation": "",
+      "method": "get",
+      "endpoint": "transactions",
+      "responses": [
+        {
+          "uuid": "c918ae91-c36f-45a7-909b-d1d53bd91d6e",
+          "body": "{\r\n   \"transactions\":[\r\n      {\r\n         \"__typename\":\"TransactionEdge\",\r\n         \"node\":{\r\n            \"__typename\":\"CardTransaction\",\r\n            \"id\":\"aucao_20b5bf7c7bd6faf833613c287072e75c\",\r\n            \"side\":\"Debit\",\r\n            \"type\":\"CardOutAuthorization\",\r\n            \"label\":\"SWAN\",\r\n            \"counterparty\":\"SWAN\",\r\n            \"reference\":\"4563352595-aucao_20\",\r\n            \"externalReference\":null,\r\n            \"payment\":{\r\n               \"__typename\":\"Payment\",\r\n               \"id\":\"cro_b0f65734d1a6abd4b5ab063ac2a95d27\",\r\n               \"createdAt\":\"2024-07-23T10:36:40.378Z\"\r\n            },\r\n            \"originTransaction\":null,\r\n            \"statusInfo\":{\r\n               \"__typename\":\"RejectedTransactionStatusInfo\",\r\n               \"status\":\"Rejected\",\r\n               \"reason\":\"SwanRefused\"\r\n            },\r\n            \"amount\":{\r\n               \"__typename\":\"Amount\",\r\n               \"currency\":\"EUR\",\r\n               \"value\":\"10.00\"\r\n            },\r\n            \"createdAt\":\"2024-07-23T10:36:40.378Z\",\r\n            \"executionDate\":\"2024-07-23T10:36:40.378Z\",\r\n            \"updatedAt\":\"2024-07-23T10:36:40.379Z\",\r\n            \"maskedPan\":\"123412XXXXXX1234\",\r\n            \"merchantCity\":\"PARIS\",\r\n            \"merchantCountry\":\"FRA\",\r\n            \"originalAmount\":{\r\n               \"__typename\":\"Amount\",\r\n               \"currency\":\"EUR\",\r\n               \"value\":\"10.00\"\r\n            },\r\n            \"card\":{\r\n               \"__typename\":\"Card\",\r\n               \"id\":\"74067a7b-f912-45ba-a015-e1481cc34bfc\",\r\n               \"accountMembership\":{\r\n                  \"__typename\":\"AccountMembership\",\r\n                  \"id\":\"de1dc952-c0b7-4aaa-8894-bb375b9ac69a\",\r\n                  \"user\":{\r\n                     \"__typename\":\"User\",\r\n                     \"id\":\"f412419a-8ef3-464a-bc19-3d20a1ff45dd\",\r\n                     \"firstName\":\"Jose\",\r\n                     \"lastName\":\"Buendia\"\r\n                  }\r\n               }\r\n            },\r\n            \"currencyExchange\":[\r\n               \r\n            ]\r\n         }\r\n      }\r\n   ]\r\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "",
+          "headers": [],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null
+    }
+  ],
+  "rootChildren": [
+    {
+      "type": "route",
+      "uuid": "67ef5a9a-b276-4dcc-b8bb-8953150094a5"
+    }
+  ],
+  "proxyMode": false,
+  "proxyHost": "",
+  "proxyRemovePrefix": false,
+  "tlsOptions": {
+    "enabled": false,
+    "type": "CERT",
+    "pfxPath": "",
+    "certPath": "",
+    "keyPath": "",
+    "caPath": "",
+    "passphrase": ""
+  },
+  "cors": true,
+  "headers": [
+    {
+      "key": "Content-Type",
+      "value": "application/json"
+    }
+  ],
+  "proxyReqHeaders": [
+    {
+      "key": "",
+      "value": ""
+    }
+  ],
+  "proxyResHeaders": [
+    {
+      "key": "",
+      "value": ""
+    }
+  ],
+  "data": [],
+  "callbacks": []
+}
