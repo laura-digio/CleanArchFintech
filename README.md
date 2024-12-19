@@ -98,6 +98,7 @@ In order to benefit from GraphQL's types, we use **code generator**:
 $ yarn graphql-codegen
 ```
 
+
 ### Build and deploy
 
 **Bundle** the client applications and the server in production with the following command:
