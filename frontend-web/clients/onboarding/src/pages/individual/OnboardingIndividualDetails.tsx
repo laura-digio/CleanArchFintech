@@ -1,3 +1,5 @@
+import { Option } from "@swan-io/boxed";
+import { useMutation } from "@swan-io/graphql-client";
 import { LakeAlert } from "@swan-io/lake/src/components/LakeAlert";
 import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
 import { Item, LakeSelect } from "@swan-io/lake/src/components/LakeSelect";
@@ -6,18 +8,19 @@ import { RadioGroup, RadioGroupItem } from "@swan-io/lake/src/components/RadioGr
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints } from "@swan-io/lake/src/constants/design";
 import { useFirstMountState } from "@swan-io/lake/src/hooks/useFirstMountState";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { emptyToUndefined } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { pick } from "@swan-io/lake/src/utils/object";
+import { trim } from "@swan-io/lake/src/utils/string";
 import { TaxIdentificationNumberInput } from "@swan-io/shared-business/src/components/TaxIdentificationNumberInput";
 import { CountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { validateIndividualTaxNumber } from "@swan-io/shared-business/src/utils/validation";
+import { combineValidators, useForm } from "@swan-io/use-form";
 import { useEffect } from "react";
-import { hasDefinedKeys, useForm } from "react-ux-form";
+import { match } from "ts-pattern";
 import { OnboardingFooter } from "../../components/OnboardingFooter";
 import { OnboardingStepContent } from "../../components/OnboardingStepContent";
 import { StepTitle } from "../../components/StepTitle";
@@ -30,7 +33,11 @@ import {
 import { locale, t } from "../../utils/i18n";
 import { Router } from "../../utils/routes";
 import { getUpdateOnboardingError } from "../../utils/templateTranslations";
-import { ServerInvalidFieldCode, getValidationErrorMessage } from "../../utils/validation";
+import {
+  ServerInvalidFieldCode,
+  getValidationErrorMessage,
+  validateRequired,
+} from "../../utils/validation";
 
 const employmentStatuses: Item<EmploymentStatus>[] = [
   { name: t("employmentStatus.craftsman"), value: "Craftsman" },
@@ -77,12 +84,17 @@ export const OnboardingIndividualDetails = ({
   accountCountry,
   serverValidationErrors,
 }: Props) => {
-  const [updateResult, updateOnboarding] = useUrqlMutation(UpdateIndividualOnboardingDocument);
+  const [updateOnboarding, updateResult] = useMutation(UpdateIndividualOnboardingDocument);
   const isFirstMount = useFirstMountState();
 
   const canSetTaxIdentification =
     (accountCountry === "DEU" && country === "DEU") ||
-    (accountCountry === "ESP" && country === "ESP");
+    (accountCountry === "ESP" && country === "ESP") ||
+    (accountCountry === "ITA" && country === "ITA");
+
+  const isTaxIdentificationRequired = match({ accountCountry, country })
+    .with({ accountCountry: "ITA", country: "ITA" }, () => true)
+    .otherwise(() => false);
 
   const { Field, submitForm, setFieldError } = useForm({
     employmentStatus: {
@@ -93,8 +105,13 @@ export const OnboardingIndividualDetails = ({
     },
     taxIdentificationNumber: {
       initialValue: initialTaxIdentificationNumber,
-      validate: canSetTaxIdentification ? validateIndividualTaxNumber(accountCountry) : undefined,
-      sanitize: value => value.trim(),
+      sanitize: trim,
+      validate: canSetTaxIdentification
+        ? combineValidators(
+            isTaxIdentificationRequired && validateRequired,
+            validateIndividualTaxNumber(accountCountry),
+          )
+        : undefined,
     },
   });
 
@@ -112,41 +129,44 @@ export const OnboardingIndividualDetails = ({
   };
 
   const onPressNext = () => {
-    submitForm(values => {
-      if (!hasDefinedKeys(values, ["employmentStatus", "monthlyIncome"])) {
-        return;
-      }
+    submitForm({
+      onSuccess: values => {
+        const option = Option.allFromDict(pick(values, ["employmentStatus", "monthlyIncome"]));
 
-      const { employmentStatus, monthlyIncome, taxIdentificationNumber } = values;
+        if (option.isNone()) {
+          return;
+        }
 
-      updateOnboarding({
-        input: {
-          onboardingId,
-          employmentStatus,
-          monthlyIncome,
-          taxIdentificationNumber: emptyToUndefined(taxIdentificationNumber ?? ""),
+        const { employmentStatus, monthlyIncome } = option.get();
+
+        const taxIdentificationNumber = values.taxIdentificationNumber
+          .flatMap(value => Option.fromNullable(emptyToUndefined(value)))
+          .toUndefined();
+
+        updateOnboarding({
+          input: {
+            onboardingId,
+            employmentStatus,
+            monthlyIncome,
+            taxIdentificationNumber,
+            language: locale.language,
+          },
           language: locale.language,
-        },
-        language: locale.language,
-      })
-        .mapOk(data => data.unauthenticatedUpdateIndividualOnboarding)
-        .mapOkToResult(filterRejectionsToResult)
-        .tapOk(() => Router.push("Finalize", { onboardingId }))
-        .tapError(error => {
-          const errorMessage = getUpdateOnboardingError(error);
-          showToast({
-            variant: "error",
-            title: errorMessage.title,
-            description: errorMessage.description,
+        })
+          .mapOk(data => data.unauthenticatedUpdateIndividualOnboarding)
+          .mapOkToResult(filterRejectionsToResult)
+          .tapOk(() => Router.push("Finalize", { onboardingId }))
+          .tapError(error => {
+            showToast({ variant: "error", error, ...getUpdateOnboardingError(error) });
           });
-        });
+      },
     });
   };
 
   return (
     <>
       <OnboardingStepContent>
-        <ResponsiveContainer breakpoint={breakpoints.medium} style={commonStyles.fillNoShrink}>
+        <ResponsiveContainer breakpoint={breakpoints.medium}>
           {({ small }) => (
             <>
               <StepTitle isMobile={small}>{t("individual.step.details.title")}</StepTitle>
@@ -215,6 +235,7 @@ export const OnboardingIndividualDetails = ({
                           onBlur={onBlur}
                           accountCountry={accountCountry}
                           isCompany={false}
+                          required={isTaxIdentificationRequired}
                         />
                       )}
                     </Field>
@@ -227,8 +248,6 @@ export const OnboardingIndividualDetails = ({
             </>
           )}
         </ResponsiveContainer>
-
-        <Space height={24} />
 
         <OnboardingFooter
           onPrevious={onPressPrevious}

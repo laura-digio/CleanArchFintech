@@ -1,47 +1,46 @@
+import { Array, AsyncData, Option, Result } from "@swan-io/boxed";
+import { ClientError, useQuery } from "@swan-io/graphql-client";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
+import { LoadingView } from "@swan-io/lake/src/components/LoadingView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
-import { TransitionView } from "@swan-io/lake/src/components/TransitionView";
-import { animations, colors } from "@swan-io/lake/src/constants/design";
-import { useDebounce } from "@swan-io/lake/src/hooks/useDebounce";
-import { useUrqlQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { isNotNullishOrEmpty } from "@swan-io/lake/src/utils/nullish";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
-import { hasDefinedKeys, useForm } from "react-ux-form";
-
-import { AsyncData, Result } from "@swan-io/boxed";
-import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
-import { LakeTextInput } from "@swan-io/lake/src/components/LakeTextInput";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { spacings } from "@swan-io/lake/src/constants/design";
 import { noop } from "@swan-io/lake/src/utils/function";
+import { isNotEmpty } from "@swan-io/lake/src/utils/nullish";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
+import { useCallback, useEffect, useRef } from "react";
+import { StyleSheet } from "react-native";
 import { P, match } from "ts-pattern";
 import {
   GetInternationalCreditTransferTransactionDetailsDynamicFormDocument,
   InternationalCreditTransferDisplayLanguage,
-  InternationalCreditTransferRouteInput,
 } from "../graphql/partner";
 import { locale, t } from "../utils/i18n";
-import { isCombinedError } from "../utils/urql";
+import { InternationalBeneficiary } from "./BeneficiaryInternationalWizardForm";
+import { ErrorView } from "./ErrorView";
 import {
-  DynamicFormApi,
-  DynamicFormField,
-  ResultItem,
-  TransferInternationalDynamicFormBuilder,
-} from "./TransferInternationalDynamicFormBuilder";
+  DynamicFormRef,
+  FormValue,
+  TransferInternationalDynamicForm,
+} from "./TransferInternationalDynamicForm";
 import { Amount } from "./TransferInternationalWizardAmount";
-import { Beneficiary } from "./TransferInternationalWizardBeneficiary";
+
+const styles = StyleSheet.create({
+  loadingOrError: {
+    justifyContent: "flex-start",
+    paddingVertical: spacings[48],
+  },
+});
 
 export type Details = {
-  results: ResultItem[];
-  externalReference: string;
+  values: FormValue[];
 };
 
 type Props = {
   initialDetails?: Details;
   amount: Amount;
-  beneficiary: Beneficiary;
+  beneficiary: InternationalBeneficiary;
   loading: boolean;
   onPressPrevious: (errors?: string[]) => void;
   onSave: (details: Details) => void;
@@ -55,156 +54,107 @@ export const TransferInternationalWizardDetails = ({
   onPressPrevious,
   onSave,
 }: Props) => {
-  const [fields, setFields] = useState<DynamicFormField[]>([]);
-  const [dynamicFields, setDynamicFields] = useState(initialDetails?.results ?? []);
+  const dynamicFormRef = useRef<DynamicFormRef>(null);
 
-  const dynamicFormApiRef = useRef<DynamicFormApi | null>(null);
-
-  const { data } = useUrqlQuery(
+  const [data, { isLoading, setVariables }] = useQuery(
+    GetInternationalCreditTransferTransactionDetailsDynamicFormDocument,
     {
-      query: GetInternationalCreditTransferTransactionDetailsDynamicFormDocument,
-      variables: {
-        name: beneficiary.name,
-        route: beneficiary.route as InternationalCreditTransferRouteInput,
-        amountValue: amount.value,
-        currency: amount.currency,
-        language: locale.language as InternationalCreditTransferDisplayLanguage,
-        dynamicFields,
-        beneficiaryDetails: beneficiary.results,
-      },
+      name: beneficiary.name,
+      route: beneficiary.route,
+      amountValue: amount.value,
+      currency: amount.currency,
+      language: locale.language as InternationalCreditTransferDisplayLanguage,
+      dynamicFields: initialDetails?.values,
+      beneficiaryDetails: beneficiary.values,
     },
-    [locale.language, dynamicFields],
   );
-
-  const { Field, submitForm, getFieldState, listenFields } = useForm<{
-    results: ResultItem[];
-    externalReference: string;
-  }>({
-    results: {
-      initialValue: initialDetails?.results ?? [],
-      validate: () => undefined,
-    },
-    externalReference: {
-      initialValue: initialDetails?.externalReference ?? "",
-      validate: () => undefined,
-    },
-  });
 
   useEffect(() => {
     match(data)
-      .with(
-        AsyncData.P.Done(
-          Result.P.Ok({
-            internationalCreditTransferTransactionDetailsDynamicForm: P.select(P.not(P.nullish)),
-          }),
-        ),
-        ({ fields }) => setFields(fields),
-      )
       .with(AsyncData.P.Done(Result.P.Error(P.select())), error => {
-        if (isCombinedError(error)) {
-          match(error)
+        const messages = Array.filterMap(ClientError.toArray(error), error => {
+          return match(error)
             .with(
               {
-                graphQLErrors: P.array({
-                  extensions: {
-                    code: "BeneficiaryValidationError",
-                    errors: P.array({ message: P.select(P.string) }),
+                extensions: {
+                  code: "BeneficiaryValidationError",
+                  meta: {
+                    fields: P.array({ message: P.select(P.string) }),
                   },
-                }),
+                },
               },
-              ([messages]) => {
-                onPressPrevious(messages);
-              },
+              ([messages]) => Option.fromNullable(messages),
             )
-            .otherwise(() => showToast({ variant: "error", title: t("error.generic") }));
+            .otherwise(() => Option.None());
+        });
+
+        if (messages.length > 0) {
+          onPressPrevious(messages);
+        } else {
+          showToast({ variant: "error", error, title: t("error.generic") });
         }
       })
       .otherwise(noop);
   }, [data, onPressPrevious]);
 
-  const refresh = useDebounce<void>(() => {
-    const { value } = getFieldState("results");
+  const onRefreshRequest = useCallback(
+    (values: FormValue[]) => {
+      setVariables({ dynamicFields: values.filter(({ value }) => isNotEmpty(value)) });
+    },
+    [setVariables],
+  );
 
-    setDynamicFields(value?.filter(({ value }) => isNotNullishOrEmpty(value)) ?? []);
-  }, 1000);
-
-  useEffect(() => {
-    listenFields(["results"], () => refresh());
-  }, [fields, listenFields, refresh]);
-
-  return (
-    <View>
-      <Tile>
-        <LakeLabel
-          label={t("transfer.new.internationalTransfer.details.form.field.customLabel")}
-          render={id => (
-            <Field name="externalReference">
-              {({ value, onChange, onBlur, error, valid, ref }) => (
-                <LakeTextInput
-                  id={id}
-                  ref={ref}
-                  value={value}
-                  error={error}
-                  valid={valid}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  inputMode="text"
-                />
-              )}
-            </Field>
-          )}
-        />
-
-        {data.isLoading() && !fields.length ? (
-          <ActivityIndicator color={colors.gray[900]} />
-        ) : (
-          <TransitionView {...(data.isLoading() && animations.heartbeat)}>
-            <Field name="results">
-              {({ onChange, value }) => (
-                <TransferInternationalDynamicFormBuilder
-                  ref={dynamicFormApiRef}
-                  fields={fields}
-                  onChange={onChange}
-                  results={value}
-                  key={fields?.map(({ key }) => key).join(":")}
-                />
-              )}
-            </Field>
-          </TransitionView>
-        )}
-      </Tile>
-
-      <Space height={32} />
-
+  return match(
+    data
+      .mapOk(data => data.internationalCreditTransferTransactionDetailsDynamicForm)
+      .mapOkToResult(data => Option.fromNullable(data).toResult(undefined)),
+  )
+    .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => (
+      <LoadingView style={styles.loadingOrError} />
+    ))
+    .with(AsyncData.P.Done(Result.P.Error(P.select())), error => (
+      <ErrorView error={error} style={styles.loadingOrError} />
+    ))
+    .with(AsyncData.P.Done(Result.P.Ok(P.select())), ({ fields }) => (
       <ResponsiveContainer breakpoint={800}>
         {({ small }) => (
-          <LakeButtonGroup>
-            <LakeButton color="gray" mode="secondary" onPress={() => onPressPrevious()}>
-              {t("common.previous")}
-            </LakeButton>
+          <>
+            <Tile>
+              <TransferInternationalDynamicForm
+                ref={dynamicFormRef}
+                fields={fields}
+                onRefreshRequest={onRefreshRequest}
+                refreshing={isLoading}
+                initialValues={initialDetails?.values ?? []}
+                onSubmit={values => {
+                  onSave({ values });
+                }}
+              />
+            </Tile>
 
-            <LakeButton
-              color="current"
-              disabled={data.isLoading() || loading}
-              grow={small}
-              onPress={() => {
-                const runCallback = () =>
-                  submitForm(values => {
-                    if (hasDefinedKeys(values, ["externalReference", "results"])) {
-                      onSave(values);
-                    }
-                  });
+            <Space height={32} />
 
-                fields.length === 0
-                  ? runCallback()
-                  : dynamicFormApiRef.current?.submitDynamicForm(runCallback);
-              }}
-            >
-              {t("common.continue")}
-            </LakeButton>
-          </LakeButtonGroup>
+            <LakeButtonGroup>
+              <LakeButton color="gray" mode="secondary" onPress={() => onPressPrevious()}>
+                {t("common.previous")}
+              </LakeButton>
+
+              <LakeButton
+                color="current"
+                disabled={data.isLoading() || loading}
+                grow={small}
+                onPress={() => {
+                  if (dynamicFormRef.current != null) {
+                    dynamicFormRef.current.submit();
+                  }
+                }}
+              >
+                {t("common.continue")}
+              </LakeButton>
+            </LakeButtonGroup>
+          </>
         )}
       </ResponsiveContainer>
-    </View>
-  );
+    ))
+    .exhaustive();
 };

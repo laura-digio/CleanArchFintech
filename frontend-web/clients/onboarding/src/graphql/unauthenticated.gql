@@ -24,6 +24,13 @@ fragment UBO on IndividualUltimateBeneficialOwner {
     postalCode
     state
   }
+  identityDocumentDetails {
+    type
+    issueDate
+    issuingAuthority
+    expiryDate
+    number
+  }
 }
 
 fragment IndividualAccountHolder on OnboardingIndividualAccountHolderInfo {
@@ -91,6 +98,27 @@ fragment OnboardingInvalidInfo on OnboardingStatusInfo {
   }
 }
 
+fragment SupportingDocument on SupportingDocument {
+  id
+  supportingDocumentPurpose
+  supportingDocumentType
+  updatedAt
+  statusInfo {
+    __typename
+    status
+    ... on SupportingDocumentUploadedStatusInfo {
+      filename
+    }
+    ... on SupportingDocumentValidatedStatusInfo {
+      filename
+    }
+    ... on SupportingDocumentRefusedStatusInfo {
+      reason
+      filename
+    }
+  }
+}
+
 fragment OnboardingData on OnboardingInfo {
   __typename
   id
@@ -116,26 +144,11 @@ fragment OnboardingData on OnboardingInfo {
     requiredSupportingDocumentPurposes {
       name
     }
+    statusInfo {
+      status
+    }
     supportingDocuments {
-      id
-      supportingDocumentPurpose
-      supportingDocumentType
-      updatedAt
-      statusInfo {
-        __typename
-        status
-        ... on SupportingDocumentUploadedStatusInfo {
-          downloadUrl
-          filename
-        }
-        ... on SupportingDocumentValidatedStatusInfo {
-          downloadUrl
-          filename
-        }
-        ... on SupportingDocumentRefusedStatusInfo {
-          filename
-        }
-      }
+      ...SupportingDocument
     }
   }
   info {
@@ -219,15 +232,6 @@ mutation UpdateCompanyOnboarding(
   }
 }
 
-# TODO Remove this query once onboarding v2 is released
-query GetCompanyUBO($input: CompanyUboByCompanyRefAndHeadquarterCountryInput!) {
-  companyUboByCompanyRefAndHeadquarterCountry(input: $input) {
-    individualUltimateBeneficialOwners {
-      ...UBO
-    }
-  }
-}
-
 mutation generateSupportingDocumentUploadUrl($input: GenerateSupportingDocumentUploadUrlInput!) {
   generateSupportingDocumentUploadUrl(input: $input) {
     __typename
@@ -240,6 +244,59 @@ mutation generateSupportingDocumentUploadUrl($input: GenerateSupportingDocumentU
         }
         url
       }
+    }
+  }
+}
+
+query SupportingDocumentCollection($supportingDocumentCollectionId: ID!) {
+  supportingDocumentCollection(id: $supportingDocumentCollectionId) {
+    id
+    accountHolder {
+      id
+      name
+    }
+    requiredSupportingDocumentPurposes {
+      name
+    }
+    statusInfo {
+      status
+    }
+    supportingDocuments {
+      ...SupportingDocument
+    }
+    projectInfo {
+      id
+      accentColor
+      name
+      logoUri
+    }
+  }
+}
+
+mutation RequestSupportingDocumentCollectionReview(
+  $input: RequestSupportingDocumentCollectionReviewInput!
+) {
+  requestSupportingDocumentCollectionReview(input: $input) {
+    __typename
+    ... on RequestSupportingDocumentCollectionReviewSuccessPayload {
+      supportingDocumentCollection {
+        id
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
+mutation DeleteSupportingDocument($input: DeleteSupportingDocumentInput!) {
+  deleteSupportingDocument(input: $input) {
+    __typename
+    ... on DeleteSupportingDocumentSuccessPayload {
+      id
+    }
+    ... on Rejection {
+      message
     }
   }
 }

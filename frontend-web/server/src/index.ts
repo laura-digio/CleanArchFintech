@@ -11,6 +11,7 @@ const countryTranslations: Record<AccountCountry, string> = {
   ESP: "Spanish",
   FRA: "French",
   NLD: "Dutch",
+  ITA: "Italian",
 };
 
 const accountCountries = Object.keys(countryTranslations) as AccountCountry[];
@@ -70,6 +71,7 @@ start({
         }/onboarding/company/start?accountCountry=${cca3}`,
       );
     });
+    console.log(`${pc.magenta("Payment")} -> ${env.PAYMENT_URL}`);
     console.log(`${pc.white("---")}`);
     console.log(``);
     console.log(``);

@@ -1,8 +1,9 @@
 import { createIntl, createIntlCache } from "@formatjs/intl";
 import { Dict } from "@swan-io/boxed";
-import { memoize } from "@swan-io/lake/src/utils/function";
+import { deriveUnion, memoize } from "@swan-io/lake/src/utils/function";
 import { getRifmProps } from "@swan-io/lake/src/utils/rifm";
-import { DateFormat } from "@swan-io/shared-business/src/components/DatePicker";
+import { FlagCode } from "@swan-io/shared-business/src/components/Flag";
+import { DateFormat } from "@swan-io/shared-business/src/utils/i18n";
 import {
   LANGUAGE_FALLBACK,
   getLanguagesHelpers,
@@ -21,6 +22,7 @@ import localizedFormat from "dayjs/plugin/localizedFormat";
 import relativeTime from "dayjs/plugin/relativeTime";
 import utc from "dayjs/plugin/utc";
 import { ReactElement, ReactNode, cloneElement, isValidElement } from "react";
+import { AccountLanguage } from "../graphql/partner";
 import translationDE from "../locales/de.json";
 import translationEN from "../locales/en.json";
 import translationES from "../locales/es.json";
@@ -176,8 +178,8 @@ export const t = (key: TranslationKey, params?: TranslationParams) =>
   intl.formatMessage({ id: key, defaultMessage: translationEN[key] }, params).toString();
 
 export const formatDateTime = memoize(
-  (date: Date, format: DateTimeFormat) => dayjs(date).format(format),
-  (date: Date, format: DateTimeFormat) => `${date.toString()} - ${format}`,
+  (date: Date | string, format: DateTimeFormat) => dayjs(date).format(format),
+  (date: Date | string, format: DateTimeFormat) => `${date.toString()} - ${format}`,
 );
 
 export const formatCurrency = (value: number, currency: string) =>
@@ -193,7 +195,7 @@ export const formatNestedMessage = (
     params,
   );
 
-  const resultArray: (string | ReactElement)[] = typeof result === "string" ? [result] : result;
+  const resultArray: (string | ReactElement)[] = Array.isArray(result) ? result : [result];
 
   return resultArray.map((item, index) =>
     isValidElement(item) ? cloneElement(item, { key: `t-${key}-${index}` }) : item,
@@ -279,42 +281,84 @@ export const languages: Language[] = [
   },
 ];
 
-export const currencies = [
-  "GBP",
-  "USD",
-  "AED",
-  "BGN",
+const accountLanguageUnion = deriveUnion<AccountLanguage>({
+  de: true,
+  en: true,
+  es: true,
+  fr: true,
+  it: true,
+  nl: true,
+  pt: true,
+  fi: true,
+});
+
+export const accountLanguages = {
+  ...accountLanguageUnion,
+
+  items: languages.reduce<{ name: string; value: AccountLanguage }[]>((acc, language) => {
+    if (accountLanguageUnion.is(language.id)) {
+      acc.push({ name: language.native, value: language.id });
+    }
+
+    return acc;
+  }, []),
+};
+
+const currenciesTuple = [
+  "AUD",
+  "BRL",
   "CAD",
   "CHF",
-  "CRC",
-  "CZK",
-  "DKK",
-  "EGP",
-  "GEL",
-  "HUF",
-  "ILS",
-  "NOK",
-  "PLN",
-  "RON",
-  "TRY",
-  "UAH",
-  "MYR",
-  "ZAR",
-  "BRL",
   "CLP",
+  "EUR",
+  "GBP",
   "HKD",
-  "KES",
+  "IDR",
+  "ILS",
+  "INR",
+  "JPY",
   "KRW",
-  "MAD",
-  "NPR",
-  "PHP",
+  "MXN",
+  "MYR",
+  "NZD",
   "SGD",
   "THB",
-  "ARS",
-  "AUD",
-  "FJD",
-  "INR",
-  "MXN",
-  "NZD",
+  "USD",
+  "UYU",
+  "VND",
 ] as const;
-export type Currency = (typeof currencies)[number];
+
+export type Currency = (typeof currenciesTuple)[number];
+export const currencies = currenciesTuple.toSorted();
+
+export const isSupportedCurrency = (value: unknown): value is Currency =>
+  typeof value === "string" && currenciesTuple.includes(value as Currency);
+
+export const currencyResolver =
+  "Intl" in window && "DisplayNames" in window.Intl
+    ? new Intl.DisplayNames([locale.language], { type: "currency" })
+    : undefined;
+
+export const currencyFlags: Record<Currency, FlagCode> = {
+  AUD: "AU",
+  BRL: "BR",
+  CAD: "CA",
+  CHF: "CH",
+  CLP: "CL",
+  EUR: "EU",
+  GBP: "GB",
+  HKD: "HK",
+  IDR: "ID",
+  ILS: "IL",
+  INR: "IN",
+  JPY: "JP",
+  KRW: "KR",
+  MXN: "MX",
+  MYR: "MY",
+  NZD: "NZ",
+  SGD: "SG",
+  THB: "TH",
+  USD: "US",
+  UYU: "UY",
+  VND: "VN",
+};

@@ -1,6 +1,5 @@
 # Swan Partner Front-end
 
-
 > Onboarding & Banking clients for Swan
 
 - [Documentation](https://swan-io.github.io/swan-partner-frontend)
@@ -9,18 +8,18 @@
 ## Clone
 
 ```console
-$ git clone git@github.com:madeindigio/FintechPlayer.git
-$ cd frontend-web
+$ git clone git@github.com:swan-io/swan-partner-frontend.git
+$ cd swan-partner-frontend
 ```
 
 ## Install
 
 ### 1. Dependencies
 
-Install [yarn](https://yarnpkg.com/en/docs/install) (needed for the monorepo management).
+Install [pnpm](https://pnpm.io/installation) (needed for the monorepo management).
 
 ```console
-$ yarn
+$ pnpm install
 ```
 
 ### 2. Hosts
@@ -30,6 +29,7 @@ Add the following to your `/etc/hosts` file (so that we're able to replicate the
 ```
 127.0.0.1 banking.swan.local
 127.0.0.1 onboarding.swan.local
+127.0.0.1 payment.swan.local
 ```
 
 ### 3. HTTPS
@@ -64,13 +64,13 @@ $ mkcert "*.swan.local"
 To configure your project, simply the following command, it will prompt you with the required values:
 
 ```console
-$ yarn configure
+$ pnpm configure
 ```
 
 and then you start the development server!
 
 ```console
-$ yarn dev
+$ pnpm dev
 ```
 
 ## Environment variables
@@ -89,7 +89,7 @@ Add your values:
 - `UNAUTHENTICATED_API_URL`
   - `https://api.swan.io/sandbox-unauthenticated/graphql` in sandbox
   - `https://api.swan.io/live-unauthenticated/graphql` in live
-- `COOKIE_KEY` (generate one using `yarn generate-cookie-key`)
+- `COOKIE_KEY` (generate one using `pnpm generate-cookie-key`)
 
 And get the following from your [dashboard](https://dashboard.swan.io):
 
@@ -107,7 +107,7 @@ You can provide environment variables to the client by adding keys starting with
 Then you can run the following command to make the TypeScript compiler aware of these variables:
 
 ```console
-$ yarn type-env-vars
+$ pnpm type-env-vars
 ```
 
 They'll be accessible in the client code in the `__env` object.
@@ -119,7 +119,7 @@ They'll be accessible in the client code in the `__env` object.
 To start the development server, use the following command:
 
 ```console
-$ yarn dev
+$ pnpm dev
 ```
 
 You'll find:
@@ -148,19 +148,19 @@ For better performance (and confort!), it's recommended to set:
 ## Linting
 
 ```console
-$ yarn lint
+$ pnpm lint
 ```
 
 You can also configure `lint-staged` as a pre-commit hook by running the following command :
 
 ```console
-$ yarn configure-hooks
+$ pnpm configure-hooks
 ```
 
 ## Testing
 
 ```console
-$ yarn test
+$ pnpm test
 ```
 
 We generally collocate test files next to their implementation, in a `__tests__` directory, with the tested file name suffixed with `.test`:

@@ -1,4 +1,5 @@
-import { AsyncData, Result } from "@swan-io/boxed";
+import { Array, AsyncData, Option, Result } from "@swan-io/boxed";
+import { ClientError, useDeferredQuery, useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Fill } from "@swan-io/lake/src/components/Fill";
 import { LakeAlert } from "@swan-io/lake/src/components/LakeAlert";
@@ -10,13 +11,13 @@ import { LakeTextInput } from "@swan-io/lake/src/components/LakeTextInput";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Separator } from "@swan-io/lake/src/components/Separator";
 import { Space } from "@swan-io/lake/src/components/Space";
+import { Tag } from "@swan-io/lake/src/components/Tag";
 import { Tile } from "@swan-io/lake/src/components/Tile";
 import { colors, radii } from "@swan-io/lake/src/constants/design";
-import { useUrqlQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
 import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { useForm } from "@swan-io/use-form";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { hasDefinedKeys, useForm } from "react-ux-form";
 import { P, match } from "ts-pattern";
 import {
   GetAvailableAccountBalanceDocument,
@@ -24,7 +25,6 @@ import {
   GetInternationalCreditTransferQuoteQuery,
 } from "../graphql/partner";
 import { Currency, currencies, formatCurrency, formatNestedMessage, t } from "../utils/i18n";
-import { isCombinedError } from "../utils/urql";
 import { ErrorView } from "./ErrorView";
 
 const styles = StyleSheet.create({
@@ -56,6 +56,7 @@ const CURRENCY_DEFAULT_VALUE = "USD";
 
 type Props = {
   initialAmount?: Amount;
+  forcedCurrency?: Currency;
   onPressPrevious: () => void;
   onSave: (amount: Amount) => void;
   accountMembershipId: string;
@@ -64,34 +65,35 @@ type Props = {
 
 export const TransferInternationalWizardAmount = ({
   initialAmount,
+  forcedCurrency,
   onPressPrevious,
   accountMembershipId,
   accountId,
   onSave,
 }: Props) => {
   const [input, setInput] = useState<Amount | undefined>();
-  const { data: balance } = useUrqlQuery(
-    {
-      query: GetAvailableAccountBalanceDocument,
-      variables: { accountMembershipId },
-    },
-    [accountMembershipId],
+  const [balance] = useQuery(GetAvailableAccountBalanceDocument, { accountMembershipId });
+
+  const [quote, { query: queryQuote, reset: resetQuote }] = useDeferredQuery(
+    GetInternationalCreditTransferQuoteDocument,
   );
 
-  const { data: quote } = useUrqlQuery(
-    {
-      query: GetInternationalCreditTransferQuoteDocument,
-      variables: { accountId, ...(input ?? { value: "", currency: "" }) },
-      pause: !input || input?.value === "0" || Number.isNaN(Number(input?.value)),
-    },
-    [input],
-  );
+  useEffect(() => {
+    if (input != null && input.value !== "0" && !Number.isNaN(Number(input.value))) {
+      const request = queryQuote({ accountId, ...input });
+      return () => request.cancel();
+    } else {
+      resetQuote();
+    }
+  }, [input, accountId, queryQuote, resetQuote]);
 
-  const { Field, submitForm, listenFields } = useForm({
+  const { Field, submitForm, listenFields } = useForm<{
+    amount: { value: string; currency: Currency };
+  }>({
     amount: {
-      initialValue: initialAmount ?? {
-        value: FIXED_AMOUNT_DEFAULT_VALUE,
-        currency: CURRENCY_DEFAULT_VALUE,
+      initialValue: {
+        value: initialAmount?.value ?? FIXED_AMOUNT_DEFAULT_VALUE,
+        currency: forcedCurrency ?? initialAmount?.currency ?? CURRENCY_DEFAULT_VALUE,
       },
       sanitize: ({ value, currency }) => ({ value: value.replace(/,/g, "."), currency }),
       validate: ({ value }) => {
@@ -111,36 +113,33 @@ export const TransferInternationalWizardAmount = ({
         amount: {
           value: { currency, value },
         },
-      }) => setInput(value && value !== "0" ? ({ currency, value } as Amount) : undefined),
+      }) => setInput(value && value !== "0" ? { currency, value } : undefined),
     );
   }, [listenFields]);
 
   const errors = match(quote)
     .with(AsyncData.P.Done(Result.P.Error(P.select())), error => {
-      if (isCombinedError(error)) {
+      return Array.filterMap(ClientError.toArray(error), error => {
         return match(error)
           .with(
             {
-              graphQLErrors: P.array({
-                extensions: {
-                  code: "QuoteValidationError",
-                  errors: P.array({ message: P.select(P.string) }),
+              extensions: {
+                code: "QuoteValidationError",
+                meta: {
+                  fields: P.array({ message: P.select(P.string) }),
                 },
-              }),
+              },
             },
-            ([messages]) => messages ?? [],
+            ([messages]) => Option.fromNullable(messages),
           )
-          .otherwise(() => []);
-      }
-      return [];
+          .otherwise(() => Option.None());
+      });
     })
     .otherwise(() => []);
 
   const metadata = match(quote)
     .with(
-      AsyncData.P.Done(
-        Result.P.Ok({ internationalCreditTransferQuote: P.select(P.not(P.nullish)) }),
-      ),
+      AsyncData.P.Done(Result.P.Ok({ internationalCreditTransferQuote: P.select(P.nonNullable) })),
       quote => ({
         rate: quote.exchangeRate,
         total: quote.sourceAmount as Amount,
@@ -172,7 +171,7 @@ export const TransferInternationalWizardAmount = ({
       >
         {match(balance)
           .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => (
-            <ActivityIndicator color={colors.gray[900]} />
+            <ActivityIndicator color={colors.gray[500]} />
           ))
           .with(AsyncData.P.Done(Result.P.Ok(P.select())), data => {
             const availableBalance = data.accountMembership?.account?.balances?.available;
@@ -210,16 +209,22 @@ export const TransferInternationalWizardAmount = ({
                   value={value}
                   error={error}
                   valid={valid}
+                  inputMode="numeric"
+                  onBlur={onBlur}
                   onChangeText={nextValue => {
                     onChange({ currency, value: nextValue.replace(/,/g, ".") });
                   }}
-                  onBlur={onBlur}
-                  units={currencies.toSorted() as unknown as string[]}
-                  unit={currency}
-                  inputMode="numeric"
-                  onUnitChange={nextCurrency => {
-                    onChange({ currency: nextCurrency as Currency, value });
-                  }}
+                  {...(isNotNullish(forcedCurrency)
+                    ? {
+                        renderEnd: () => <Tag>{forcedCurrency}</Tag>,
+                      }
+                    : {
+                        units: currencies,
+                        unit: currency,
+                        onUnitChange: nextCurrency => {
+                          onChange({ currency: nextCurrency as Currency, value });
+                        },
+                      })}
                 />
               )}
             </Field>
@@ -235,7 +240,7 @@ export const TransferInternationalWizardAmount = ({
               .with(AsyncData.P.Loading, () => <QuoteDetailsPlaceholder />)
               .with(
                 AsyncData.P.Done(
-                  Result.P.Ok({ internationalCreditTransferQuote: P.select(P.not(P.nullish)) }),
+                  Result.P.Ok({ internationalCreditTransferQuote: P.select(P.nonNullable) }),
                 ),
                 quote => <QuoteDetails quote={quote} />,
               )
@@ -258,13 +263,12 @@ export const TransferInternationalWizardAmount = ({
               color="current"
               onPress={() =>
                 errors?.length === 0 &&
-                submitForm(values => {
-                  if (hasDefinedKeys(values, ["amount"]) && isNotNullish(metadata)) {
-                    onSave({
-                      value: values.amount.value,
-                      currency: values.amount.currency as Currency,
-                    });
-                  }
+                submitForm({
+                  onSuccess: ({ amount }) => {
+                    if (amount.isSome() && isNotNullish(metadata)) {
+                      onSave(amount.get());
+                    }
+                  },
                 })
               }
               grow={small}
@@ -284,7 +288,7 @@ type SummaryProps = {
   onPressEdit: () => void;
 };
 
-export const TransferInternationamWizardAmountSummary = ({
+export const TransferInternationalWizardAmountSummary = ({
   isMobile,
   amount,
   onPressEdit,

@@ -1,31 +1,26 @@
 import { Array, Option } from "@swan-io/boxed";
 import { Link } from "@swan-io/chicane";
+import { useQuery } from "@swan-io/graphql-client";
 import { BorderedIcon } from "@swan-io/lake/src/components/BorderedIcon";
-import {
-  FixedListViewEmpty,
-  PlainListViewPlaceholder,
-} from "@swan-io/lake/src/components/FixedListView";
-import {
-  CellAction,
-  CenteredCell,
-  EndAlignedCell,
-  SimpleHeaderCell,
-  SimpleRegularTextCell,
-  SimpleTitleCell,
-} from "@swan-io/lake/src/components/FixedListViewCells";
+import { Cell, HeaderCell, TextCell } from "@swan-io/lake/src/components/Cells";
+import { EmptyView } from "@swan-io/lake/src/components/EmptyView";
 import { Icon } from "@swan-io/lake/src/components/Icon";
-import { ColumnConfig, PlainListView } from "@swan-io/lake/src/components/PlainListView";
+import {
+  ColumnConfig,
+  PlainListView,
+  PlainListViewPlaceholder,
+} from "@swan-io/lake/src/components/PlainListView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints, colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
 import { GetNode } from "@swan-io/lake/src/utils/types";
 import dayjs from "dayjs";
 import { StyleSheet, View } from "react-native";
 import { ErrorView } from "../components/ErrorView";
 import { AccountStatementsPageDocument, AccountStatementsPageQuery } from "../graphql/partner";
 import { t } from "../utils/i18n";
+import { Connection } from "./Connection";
 
 const styles = StyleSheet.create({
   columnHeaders: {
@@ -55,38 +50,34 @@ type Statement = GetNode<
 const columns: ColumnConfig<Statement, ExtraInfo>[] = [
   {
     title: t("accountStatements.period"),
-    width: 150,
+    width: "grow",
     id: "period",
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { openingDate } }) => (
-      <SimpleTitleCell text={dayjs(openingDate).format("MMMM YYYY")} />
+      <TextCell variant="medium" text={dayjs(openingDate).format("MMMM YYYY")} />
     ),
   },
   {
     title: t("accountStatements.generated"),
-    width: "grow",
+    width: 150,
     id: "generated",
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { createdAt, status } }) => {
       return status === "Available" ? (
-        <SimpleRegularTextCell
-          textAlign="left"
-          variant="smallMedium"
-          text={dayjs(createdAt).format("MMM, DD YYYY")}
-        />
+        <TextCell variant="smallMedium" text={dayjs(createdAt).format("MMM, DD YYYY")} />
       ) : null;
     },
   },
   {
     title: "notReady",
-    width: "grow",
+    width: 180,
     id: "notReady",
     renderTitle: () => null,
     renderCell: ({ item: { status } }) => {
       return status === "Available" ? null : (
-        <SimpleRegularTextCell
+        <TextCell
+          align="right"
           color={colors.gray[300]}
-          textAlign="right"
           variant="smallMedium"
           text={t("accountStatements.notReady")}
         />
@@ -94,15 +85,15 @@ const columns: ColumnConfig<Statement, ExtraInfo>[] = [
     },
   },
   {
-    title: t("accountStatements.action"),
-    width: 70,
-    id: "action",
-    renderTitle: ({ title }) => <SimpleHeaderCell justifyContent="center" text={title} />,
+    width: 40,
+    id: "actions",
+    title: "",
+    renderTitle: () => null,
     renderCell: ({ item: { status } }) => {
       return status === "Available" ? (
-        <CenteredCell>
+        <Cell align="center">
           <Icon name="open-regular" size={16} color={colors.gray[300]} />
-        </CenteredCell>
+        </Cell>
       ) : null;
     },
   },
@@ -115,24 +106,20 @@ const smallColumns: ColumnConfig<Statement, ExtraInfo>[] = [
     id: "period",
     renderTitle: () => null,
     renderCell: ({ item: { openingDate } }) => (
-      <SimpleTitleCell text={dayjs(openingDate).format("MMMM YYYY")} />
+      <TextCell variant="medium" text={dayjs(openingDate).format("MMMM YYYY")} />
     ),
   },
   {
-    title: t("accountStatements.action"),
-    width: 50,
+    width: 40,
     id: "actions",
+    title: "",
     renderTitle: () => null,
     renderCell: ({ item: { status } }) => {
-      return status === "Available" ? (
-        <EndAlignedCell>
-          <CellAction>
+      return (
+        <Cell align="right">
+          {status === "Available" ? (
             <Icon name="open-regular" size={16} color={colors.gray[300]} />
-          </CellAction>
-        </EndAlignedCell>
-      ) : (
-        <EndAlignedCell>
-          <CellAction>
+          ) : (
             <BorderedIcon
               name="clock-regular"
               padding={4}
@@ -140,8 +127,8 @@ const smallColumns: ColumnConfig<Statement, ExtraInfo>[] = [
               color="warning"
               borderRadius={4}
             />
-          </CellAction>
-        </EndAlignedCell>
+          )}
+        </Cell>
       );
     },
   },
@@ -150,30 +137,17 @@ const smallColumns: ColumnConfig<Statement, ExtraInfo>[] = [
 const PER_PAGE = 20;
 
 export const AccountStatementMonthly = ({ accountId, large }: Props) => {
-  const { data, nextData, setAfter } = useUrqlPaginatedQuery(
-    {
-      query: AccountStatementsPageDocument,
-      variables: {
-        first: PER_PAGE,
-        accountId,
-        filters: { period: "Monthly" },
-      },
-    },
-    [accountId],
-  );
+  const [data, { isLoading, setVariables }] = useQuery(AccountStatementsPageDocument, {
+    first: PER_PAGE,
+    accountId,
+    filters: { period: "Monthly" },
+  });
 
   return (
     <>
       {data.match({
         NotAsked: () => null,
-        Loading: () => (
-          <PlainListViewPlaceholder
-            count={20}
-            rowVerticalSpacing={0}
-            headerHeight={0}
-            rowHeight={48}
-          />
-        ),
+        Loading: () => <PlainListViewPlaceholder count={20} headerHeight={48} rowHeight={48} />,
         Done: result =>
           result.match({
             Error: error => <ErrorView error={error} />,
@@ -183,39 +157,47 @@ export const AccountStatementMonthly = ({ accountId, large }: Props) => {
 
                 <ResponsiveContainer style={commonStyles.fill} breakpoint={breakpoints.large}>
                   {() => (
-                    <PlainListView
-                      headerStyle={styles.columnHeaders}
-                      rowStyle={() => (large ? styles.containerRowLarge : styles.containerRow)}
-                      breakpoint={breakpoints.tiny}
-                      data={account?.statements?.edges?.map(({ node }) => node) ?? []}
-                      keyExtractor={item => item.id}
-                      headerHeight={48}
-                      rowHeight={48}
-                      groupHeaderHeight={48}
-                      extraInfo={{ large }}
-                      columns={columns}
-                      getRowLink={({ item }) =>
-                        Array.findMap(item.type, item => Option.fromNullable(item?.url))
-                          .map(url => <Link to={url} target="_blank" />)
-                          .getWithDefault(<View />)
-                      }
-                      loading={{
-                        isLoading: nextData.isLoading(),
-                        count: NUM_TO_RENDER,
-                      }}
-                      onEndReached={() => {
-                        if (account?.statements?.pageInfo.hasNextPage ?? false) {
-                          setAfter(account?.statements?.pageInfo.endCursor ?? undefined);
-                        }
-                      }}
-                      renderEmptyList={() => (
-                        <FixedListViewEmpty
-                          icon="lake-inbox-empty"
-                          title={t("common.list.noResults")}
+                    <Connection connection={account?.statements}>
+                      {statements => (
+                        <PlainListView
+                          headerStyle={styles.columnHeaders}
+                          rowStyle={() => (large ? styles.containerRowLarge : styles.containerRow)}
+                          breakpoint={breakpoints.medium}
+                          data={statements?.edges?.map(({ node }) => node) ?? []}
+                          keyExtractor={item => item.id}
+                          headerHeight={48}
+                          rowHeight={48}
+                          groupHeaderHeight={48}
+                          extraInfo={{ large }}
+                          columns={columns}
+                          getRowLink={({ item }) => {
+                            const availableItem =
+                              item.status === "Available" ? Option.Some(item) : Option.None();
+                            return availableItem
+                              .flatMap(item =>
+                                Array.findMap(item.type, item => Option.fromNullable(item?.url)),
+                              )
+                              .map(url => <Link to={url} target="_blank" />)
+                              .getOr(<View />);
+                          }}
+                          loading={{
+                            isLoading,
+                            count: NUM_TO_RENDER,
+                          }}
+                          onEndReached={() => {
+                            if (statements?.pageInfo.hasNextPage ?? false) {
+                              setVariables({
+                                after: statements?.pageInfo.endCursor ?? undefined,
+                              });
+                            }
+                          }}
+                          renderEmptyList={() => (
+                            <EmptyView icon="lake-inbox-empty" title={t("common.list.noResults")} />
+                          )}
+                          smallColumns={smallColumns}
                         />
                       )}
-                      smallColumns={smallColumns}
-                    />
+                    </Connection>
                   )}
                 </ResponsiveContainer>
               </>

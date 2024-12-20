@@ -208,6 +208,7 @@ declare module "react-native" {
     onKeyDownCapture?: (event: NativeSyntheticEvent<React.KeyboardEvent>) => void;
     onKeyUp?: (event: NativeSyntheticEvent<React.KeyboardEvent>) => void;
     onKeyUpCapture?: (event: NativeSyntheticEvent<React.KeyboardEvent>) => void;
+    onScroll?: (event: NativeSyntheticEvent<React.UIEvent>) => void;
   }
 
   // https://github.com/necolas/react-native-web/blob/0.19.1/packages/react-native-web/src/types/styles.js
@@ -351,7 +352,8 @@ declare module "react-native" {
     | "grid"
     | "inline"
     | "inline-block"
-    | "inline-flex";
+    | "inline-flex"
+    | "list-item";
 
   type PositionValue = FlexStyle["position"] | "fixed" | "static" | "sticky";
   type WebDimensionValue = ReactNative.DimensionValue | string;
@@ -390,6 +392,21 @@ declare module "react-native" {
   export interface TextStyle extends AnimationStyles, InteractionStyles, TransformsStyle {
     display?: DisplayValue;
     fontFeatureSettings?: string;
+    fontVariantNumeric?:
+      | "normal"
+      | "ordinal"
+      | "slashed-zero"
+      | "lining-nums"
+      | "oldstyle-nums"
+      | "proportional-nums"
+      | "tabular-nums"
+      | "diagonal-fractions"
+      | "stacked-fractions"
+      | "inherit"
+      | "initial"
+      | "revert"
+      | "revert-layer"
+      | "unset";
     textOverflow?: "clip" | "ellipsis";
     textTransform?: "none" | "capitalize" | "uppercase" | "lowercase";
     transform?: string;
@@ -434,6 +451,7 @@ declare module "react-native" {
     scrollBehavior?: "auto" | "smooth";
     scrollSnapAlign?: "start" | "end" | "center";
     scrollSnapType?: string;
+    scrollbarWidth?: "auto" | "thin" | "none";
     transform?: string;
     visibility?: VisibilityValue;
 
@@ -462,36 +480,5 @@ declare module "react-native" {
     right?: WebDimensionValue;
     top?: WebDimensionValue;
     width?: WebDimensionValue;
-  }
-
-  /**
-   * Picker has been extracted from react-native core and will be removed in a future release.
-   * It can now be installed and imported from `@react-native-community/picker` instead of 'react-native'.
-   * @see https://github.com/react-native-community/react-native-picker
-   * @deprecated
-   */
-  interface PickerProps {
-    children?: React.ReactNode;
-    enabled?: boolean;
-    itemStyle?: StyleProp<TextStyle>;
-    mode?: "dialog" | "dropdown";
-    prompt?: string;
-    selectedValue?: string;
-    style?: StyleProp<TextStyle>;
-    testID?: string;
-    onValueChange?: (itemValue: any, itemPosition: number) => void;
-  }
-
-  interface PickerItemProps {
-    color?: ColorValue;
-    label: string;
-    testID?: string;
-    value?: string;
-  }
-
-  export class Picker extends React.Component<PickerProps> {
-    static MODE_DIALOG: string;
-    static MODE_DROPDOWN: string;
-    static Item: React.ComponentType<PickerItemProps>;
   }
 }

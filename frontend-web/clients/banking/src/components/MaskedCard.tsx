@@ -8,7 +8,7 @@ import { Tag } from "@swan-io/lake/src/components/Tag";
 import { colors, texts } from "@swan-io/lake/src/constants/design";
 import dayjs from "dayjs";
 import { useState } from "react";
-import { ImageBackground, StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { match } from "ts-pattern";
 import { CardStatus, PhysicalCardStatus } from "../graphql/partner";
 import { t } from "../utils/i18n";
@@ -74,6 +74,10 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundImage: `linear-gradient(to top left, rgba(196, 122, 58, 1), rgba(196, 122, 58, 0) 70%)`,
   },
+  toReniewGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundImage: `linear-gradient(to top left, rgba(96, 163, 188, 1), rgba(96, 163, 188, 0) 70%)`,
+  },
   contents: {
     flexGrow: 1,
   },
@@ -101,6 +105,7 @@ type Props = {
   expiryDate: string;
   status: Status;
   estimatedDeliveryDate?: string;
+  expired?: boolean;
 };
 
 export const MaskedCard = ({
@@ -111,6 +116,7 @@ export const MaskedCard = ({
   pan,
   expiryDate,
   estimatedDeliveryDate,
+  expired,
 }: Props) => {
   const [ratio, setRatio] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
@@ -129,13 +135,19 @@ export const MaskedCard = ({
       {/* garantee the credit card ratio */}
       <Svg role="none" viewBox="0 0 85 55" />
 
-      <ImageBackground
-        source={{ uri: cardDesignUrl }}
-        style={styles.base}
-        onLoadEnd={() => setIsVisible(true)}
-      >
-        {match(status)
-          .with("Suspended", () => <View style={styles.suspendedGradient} />)
+      <View style={styles.base}>
+        <Image
+          style={StyleSheet.absoluteFill}
+          source={{ uri: cardDesignUrl }}
+          onLoadEnd={() => setIsVisible(true)}
+        />
+
+        {match({ status, expired })
+          .with({ status: "Suspended" }, () => <View style={styles.suspendedGradient} />)
+          .with({ status: "ToRenew", expired: true }, () => (
+            <View style={styles.suspendedGradient} />
+          ))
+          .with({ status: "ToRenew" }, () => <View style={styles.toReniewGradient} />)
           .otherwise(() => null)}
 
         <View style={styles.contents}>
@@ -143,17 +155,29 @@ export const MaskedCard = ({
             {holderName}
           </Text>
 
-          {match(status)
-            .with("Canceled", "Canceled", () => (
+          {match({ status, expired })
+            .with({ status: "Canceled" }, () => (
               <>
                 <Space height={8} />
                 <Tag color="negative">{t("card.permanentlyBlocked")}</Tag>
               </>
             ))
-            .with("Suspended", () => (
+            .with({ status: "Suspended" }, () => (
               <>
                 <Space height={8} />
                 <Tag color="warning">{t("card.blocked")}</Tag>
+              </>
+            ))
+            .with({ status: "ToRenew", expired: true }, () => (
+              <>
+                <Space height={8} />
+                <Tag color="negative">{t("card.expired")}</Tag>
+              </>
+            ))
+            .with({ status: "ToRenew" }, () => (
+              <>
+                <Space height={8} />
+                <Tag color="shakespear">{t("card.toRenew")}</Tag>
               </>
             ))
             .otherwise(() => null)}
@@ -161,7 +185,7 @@ export const MaskedCard = ({
           <Fill />
 
           {match(status)
-            .with("Activated", "Enabled", "Renewed", "ToActivate", "Suspended", () => (
+            .with("Activated", "Enabled", "Renewed", "ToActivate", "Suspended", "ToRenew", () => (
               <>
                 <Text style={[styles.monospacedText, { color: textColor, fontSize: panFontSize }]}>
                   {formatPan(pan)}
@@ -232,7 +256,7 @@ export const MaskedCard = ({
             </View>
           ))
           .otherwise(() => null)}
-      </ImageBackground>
+      </View>
     </View>
   );
 };

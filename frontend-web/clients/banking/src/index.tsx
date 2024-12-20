@@ -5,6 +5,12 @@ import { ResizeObserver } from "@juggle/resize-observer";
 import "core-js/proposals/array-flat-map";
 import "core-js/proposals/change-array-by-copy-stage-4";
 import "core-js/proposals/object-from-entries";
+import "core-js/proposals/promise-all-settled";
+import "core-js/proposals/relative-indexing-method";
+import "core-js/proposals/string-replace-all-stage-4";
+
+// overrides shared-business supported languages
+import "./utils/i18n";
 
 import { Option } from "@swan-io/boxed";
 import { isNullish } from "@swan-io/lake/src/utils/nullish";

@@ -1,24 +1,25 @@
+import { Option } from "@swan-io/boxed";
+import { useMutation } from "@swan-io/graphql-client";
 import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
 import { Item, LakeSelect } from "@swan-io/lake/src/components/LakeSelect";
 import { LakeTextInput } from "@swan-io/lake/src/components/LakeTextInput";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints } from "@swan-io/lake/src/constants/design";
 import { useFirstMountState } from "@swan-io/lake/src/hooks/useFirstMountState";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
 import { noop } from "@swan-io/lake/src/utils/function";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { emptyToUndefined } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { trim } from "@swan-io/lake/src/utils/string";
 import {
   businessActivities,
   monthlyPaymentVolumes,
 } from "@swan-io/shared-business/src/constants/business";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
+import { combineValidators, useForm } from "@swan-io/use-form";
 import { useEffect } from "react";
 import { StyleSheet } from "react-native";
-import { combineValidators, hasDefinedKeys, useForm } from "react-ux-form";
 import { match } from "ts-pattern";
 import { OnboardingFooter } from "../../components/OnboardingFooter";
 import { OnboardingStepContent } from "../../components/OnboardingStepContent";
@@ -88,7 +89,7 @@ export const OnboardingCompanyOrganisation2 = ({
   initialMonthlyPaymentVolume,
   serverValidationErrors,
 }: Props) => {
-  const [updateResult, updateOnboarding] = useUrqlMutation(UpdateCompanyOnboardingDocument);
+  const [updateOnboarding, updateResult] = useMutation(UpdateCompanyOnboardingDocument);
   const isFirstMount = useFirstMountState();
 
   const { Field, submitForm, setFieldError } = useForm({
@@ -98,8 +99,8 @@ export const OnboardingCompanyOrganisation2 = ({
     },
     businessActivityDescription: {
       initialValue: initialBusinessActivityDescription,
+      sanitize: trim,
       validate: combineValidators(validateRequired, validateMaxLength(CHARACTER_LIMITATION)),
-      sanitize: value => value.trim(),
     },
     monthlyPaymentVolume: {
       initialValue: initialMonthlyPaymentVolume,
@@ -120,60 +121,59 @@ export const OnboardingCompanyOrganisation2 = ({
   };
 
   const onPressNext = () => {
-    submitForm(values => {
-      if (
-        !hasDefinedKeys(values, [
-          "businessActivity",
-          "businessActivityDescription",
-          "monthlyPaymentVolume",
-        ]) ||
-        values.businessActivity === ""
-      ) {
-        return;
-      }
+    submitForm({
+      onSuccess: values => {
+        const option = Option.allFromDict(values);
 
-      const { businessActivity, businessActivityDescription, monthlyPaymentVolume } = values;
+        if (option.isNone()) {
+          return;
+        }
 
-      updateOnboarding({
-        input: {
-          onboardingId,
-          businessActivity,
-          businessActivityDescription,
-          monthlyPaymentVolume,
+        const currentValues = option.get();
+
+        const { businessActivity, businessActivityDescription, monthlyPaymentVolume } =
+          currentValues;
+
+        if (businessActivity === "") {
+          return;
+        }
+
+        updateOnboarding({
+          input: {
+            onboardingId,
+            businessActivity,
+            businessActivityDescription,
+            monthlyPaymentVolume,
+            language: locale.language,
+          },
           language: locale.language,
-        },
-        language: locale.language,
-      })
-        .mapOk(data => data.unauthenticatedUpdateCompanyOnboarding)
-        .mapOkToResult(filterRejectionsToResult)
-        .tapOk(() => Router.push(nextStep, { onboardingId }))
-        .tapError(error => {
-          match(error)
-            .with({ __typename: "ValidationRejection" }, error => {
-              const invalidFields = extractServerValidationErrors(error, path =>
-                path[0] === "businessActivityDescription" ? "businessActivityDescription" : null,
-              );
-              invalidFields.forEach(({ fieldName, code }) => {
-                const message = getValidationErrorMessage(code, values[fieldName]);
-                setFieldError(fieldName, message);
-              });
-            })
-            .otherwise(noop);
+        })
+          .mapOk(data => data.unauthenticatedUpdateCompanyOnboarding)
+          .mapOkToResult(filterRejectionsToResult)
+          .tapOk(() => Router.push(nextStep, { onboardingId }))
+          .tapError(error => {
+            match(error)
+              .with({ __typename: "ValidationRejection" }, error => {
+                const invalidFields = extractServerValidationErrors(error, path =>
+                  path[0] === "businessActivityDescription" ? "businessActivityDescription" : null,
+                );
+                invalidFields.forEach(({ fieldName, code }) => {
+                  const message = getValidationErrorMessage(code, currentValues[fieldName]);
+                  setFieldError(fieldName, message);
+                });
+              })
+              .otherwise(noop);
 
-          const errorMessage = getUpdateOnboardingError(error);
-          showToast({
-            variant: "error",
-            title: errorMessage.title,
-            description: errorMessage.description,
+            showToast({ variant: "error", error, ...getUpdateOnboardingError(error) });
           });
-        });
+      },
     });
   };
 
   return (
     <>
       <OnboardingStepContent>
-        <ResponsiveContainer breakpoint={breakpoints.medium} style={commonStyles.fillNoShrink}>
+        <ResponsiveContainer breakpoint={breakpoints.medium}>
           {({ small }) => (
             <>
               <StepTitle isMobile={small}>{t("company.step.organisation2.title")}</StepTitle>
@@ -246,8 +246,6 @@ export const OnboardingCompanyOrganisation2 = ({
             </>
           )}
         </ResponsiveContainer>
-
-        <Space height={24} />
 
         <OnboardingFooter
           onPrevious={onPressPrevious}

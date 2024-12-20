@@ -1,3 +1,4 @@
+import { Option } from "@swan-io/boxed";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
 import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
@@ -10,10 +11,12 @@ import { Switch } from "@swan-io/lake/src/components/Switch";
 import { Tile } from "@swan-io/lake/src/components/Tile";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { colors } from "@swan-io/lake/src/constants/design";
+import { pick } from "@swan-io/lake/src/utils/object";
+import { trim } from "@swan-io/lake/src/utils/string";
 import { DatePicker, isDateInRange } from "@swan-io/shared-business/src/components/DatePicker";
+import { useForm } from "@swan-io/use-form";
 import dayjs from "dayjs";
 import { StyleSheet, View } from "react-native";
-import { hasDefinedKeys, useForm } from "react-ux-form";
 import { Rifm } from "rifm";
 import { StandingOrderPeriod } from "../graphql/partner";
 import { isToday } from "../utils/date";
@@ -48,23 +51,25 @@ type Props = {
 };
 
 export const TransferRecurringWizardSchedule = ({ onPressPrevious, onSave, loading }: Props) => {
-  const { Field, FieldsListener, submitForm } = useForm({
+  const { Field, FieldsListener, submitForm, resetField } = useForm({
     period: {
       initialValue: "Daily" as StandingOrderPeriod,
     },
     firstExecutionDate: {
       initialValue: dayjs.utc().format(locale.dateFormat),
-      validate: validateTodayOrAfter,
-      sanitize: value => value?.trim(),
+      sanitize: trim,
+      validate: value => {
+        return validateTodayOrAfter(value);
+      },
     },
     firstExecutionTime: {
       initialValue: "",
-      validate: (value, { getFieldState }) => {
+      validate: (value, { getFieldValue }) => {
         if (value === "") {
           return t("common.form.required");
         }
 
-        const date = getFieldState("firstExecutionDate").value;
+        const date = getFieldValue("firstExecutionDate");
         const isScheduleToday = isToday(date);
         const minHours = isScheduleToday ? new Date().getHours() : 0;
         const minMinutes = isScheduleToday ? new Date().getMinutes() : 0;
@@ -77,8 +82,9 @@ export const TransferRecurringWizardSchedule = ({ onPressPrevious, onSave, loadi
     },
     lastExecutionDate: {
       initialValue: "",
-      validate: (value, { getFieldState }) => {
-        const withLastExecutionDate = getFieldState("withLastExecutionDate").value;
+      sanitize: trim,
+      validate: (value, { getFieldValue }) => {
+        const withLastExecutionDate = getFieldValue("withLastExecutionDate");
         if (!withLastExecutionDate) {
           return;
         }
@@ -92,18 +98,17 @@ export const TransferRecurringWizardSchedule = ({ onPressPrevious, onSave, loadi
           return t("common.form.invalidDate");
         }
 
-        const firstExecution = getFieldState("firstExecutionDate").value;
+        const firstExecution = getFieldValue("firstExecutionDate");
         const firstExecutionDate = dayjs.utc(firstExecution, locale.dateFormat);
         if (lastExecutionDate.isBefore(firstExecutionDate)) {
           return t("error.lastExecutionDateBeforeFirstExecutionDate");
         }
       },
-      sanitize: value => value?.trim(),
     },
     lastExecutionTime: {
       initialValue: "",
-      validate: (value, { getFieldState }) => {
-        const withLastExecutionDate = getFieldState("withLastExecutionDate").value;
+      validate: (value, { getFieldValue }) => {
+        const withLastExecutionDate = getFieldValue("withLastExecutionDate");
         if (!withLastExecutionDate) {
           return;
         }
@@ -112,10 +117,10 @@ export const TransferRecurringWizardSchedule = ({ onPressPrevious, onSave, loadi
           return t("common.form.required");
         }
 
-        const firstExecutionTime = dayjs(getFieldState("firstExecutionTime").value, "HH:mm");
+        const firstExecutionTime = dayjs(getFieldValue("firstExecutionTime"), "HH:mm");
 
         const isScheduleSameDay =
-          getFieldState("firstExecutionDate").value === getFieldState("lastExecutionDate").value;
+          getFieldValue("firstExecutionDate") === getFieldValue("lastExecutionDate");
         const minHours = isScheduleSameDay ? firstExecutionTime.hour() : 0;
         const minMinutes = isScheduleSameDay ? firstExecutionTime.minute() : 0;
 
@@ -125,16 +130,20 @@ export const TransferRecurringWizardSchedule = ({ onPressPrevious, onSave, loadi
   });
 
   const onPressSubmit = () => {
-    submitForm(values => {
-      if (hasDefinedKeys(values, ["period", "firstExecutionDate", "firstExecutionTime"])) {
-        onSave({
-          period: values.period,
-          firstExecutionDate: values.firstExecutionDate,
-          firstExecutionTime: values.firstExecutionTime,
-          lastExecutionDate: values.lastExecutionDate,
-          lastExecutionTime: values.lastExecutionTime,
-        });
-      }
+    submitForm({
+      onSuccess: values => {
+        const option = Option.allFromDict(
+          pick(values, ["period", "firstExecutionDate", "firstExecutionTime"]),
+        );
+
+        if (option.isSome()) {
+          onSave({
+            ...option.get(),
+            lastExecutionDate: values.lastExecutionDate.toUndefined(),
+            lastExecutionTime: values.lastExecutionTime.toUndefined(),
+          });
+        }
+      },
     });
   };
 
@@ -172,7 +181,12 @@ export const TransferRecurringWizardSchedule = ({ onPressPrevious, onSave, loadi
                       error={error}
                       format={locale.dateFormat}
                       firstWeekDay={locale.firstWeekday}
-                      onChange={onChange}
+                      onChange={value => {
+                        onChange(value);
+                        if (dayjs.utc(value, locale.dateFormat).isSame(dayjs(), "day")) {
+                          resetField("firstExecutionTime");
+                        }
+                      }}
                       isSelectable={isDateInRange(
                         dayjs.utc().toDate(),
                         dayjs.utc().add(1, "year").toDate(),

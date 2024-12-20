@@ -1,8 +1,8 @@
 import { isNotNullishOrEmpty } from "@swan-io/lake/src/utils/nullish";
 import { DatePickerDate } from "@swan-io/shared-business/src/components/DatePicker";
 import { isValidEmail, isValidVatNumber } from "@swan-io/shared-business/src/utils/validation";
+import { Validator, combineValidators } from "@swan-io/use-form";
 import dayjs from "dayjs";
-import { Validator } from "react-ux-form";
 import { P, match } from "ts-pattern";
 import { locale, t } from "./i18n";
 
@@ -12,11 +12,28 @@ export const validateNullableRequired: Validator<string | undefined> = value => 
   }
 };
 
+export const validateArrayRequired: Validator<string[] | undefined> = value => {
+  if (value == null || value.length < 1) {
+    return t("common.form.required");
+  }
+};
+
 export const validateRequired: Validator<string> = value => {
   if (!value) {
     return t("common.form.required");
   }
 };
+
+export const validateForPermissions: Validator<string> = value => {
+  if (!value) {
+    return t("common.form.required.permissions");
+  }
+};
+
+// This regex was copied from the backend to ensure that the validation is the same
+// Matches all unicode letters, spaces, dashes, apostrophes, commas, and single quotes
+const VALID_NAME_RE =
+  /^(?:[A-Za-zÀ-ÖÙ-öù-ƿǄ-ʯʹ-ʽΈ-ΊΎ-ΡΣ-ҁҊ-Ֆա-ևႠ-Ⴥა-ჺᄀ-፜፩-ᎏᵫ-ᶚḀ-῾ⴀ-ⴥ⺀-⿕ぁ-ゖゝ-ㇿ㋿-鿯鿿-ꒌꙀ-ꙮꚀ-ꚙꜦ-ꞇꞍ-ꞿꥠ-ꥼＡ-Ｚａ-ｚ.]| |'|-|Ά|Ό|,)*$/;
 
 export const validateName: Validator<string> = value => {
   if (!value) {
@@ -28,18 +45,14 @@ export const validateName: Validator<string> = value => {
     return t("common.form.invalidName");
   }
 
-  // This regex was copied from the backend to ensure that the validation is the same
-  // Matches all unicode letters, spaces, dashes, apostrophes, commas, and single quotes
-  const isValid = value.match(
-    /^(?:[A-Za-zÀ-ÖÙ-öù-ƿǄ-ʯʹ-ʽΈ-ΊΎ-ΡΣ-ҁҊ-Ֆա-ևႠ-Ⴥა-ჺᄀ-፜፩-ᎏᵫ-ᶚḀ-῾ⴀ-ⴥ⺀-⿕ぁ-ゖゝ-ㇿ㋿-鿯鿿-ꒌꙀ-ꙮꚀ-ꚙꜦ-ꞇꞍ-ꞿꥠ-ꥼＡ-Ｚａ-ｚ]| |'|-|Ά|Ό|,)*$/,
-  );
+  const isValid = VALID_NAME_RE.test(value);
 
   if (!isValid) {
     return t("common.form.invalidName");
   }
 };
 
-//Beneficiary name input must accept numeric value, unlike other validation name
+// Beneficiary name input must accept numeric value, unlike other validation name
 export const validateBeneficiaryName: Validator<string> = value => {
   if (!value) {
     return t("common.form.required");
@@ -52,7 +65,7 @@ export const validateBeneficiaryName: Validator<string> = value => {
 
   // Matches all unicode letters, spaces, dashes, apostrophes, commas, and single quotes
   const isValid = value.match(
-    /^(?:[A-Za-zÀ-ÖÙ-öù-ƿǄ-ʯʹ-ʽΈ-ΊΎ-ΡΣ-ҁҊ-Ֆա-ևႠ-Ⴥა-ჺᄀ-፜፩-ᎏᵫ-ᶚḀ-῾ⴀ-ⴥ⺀-⿕ぁ-ゖゝ-ㇿ㋿-鿯鿿-ꒌꙀ-ꙮꚀ-ꚙꜦ-ꞇꞍ-ꞿꥠ-ꥼＡ-Ｚａ-ｚ]| |'|-|Ά|Ό|,|[1-9])*$/,
+    /^(?:[A-Za-zÀ-ÖÙ-öù-ƿǄ-ʯʹ-ʽΈ-ΊΎ-ΡΣ-ҁҊ-Ֆա-ևႠ-Ⴥა-ჺᄀ-፜፩-ᎏᵫ-ᶚḀ-῾ⴀ-ⴥ⺀-⿕ぁ-ゖゝ-ㇿ㋿-鿯鿿-ꒌꙀ-ꙮꚀ-ꚙꜦ-ꞇꞍ-ꞿꥠ-ꥼＡ-Ｚａ-ｚ.]| |'|-|Ά|Ό|,|[0-9])*$/,
   );
 
   if (!isValid) {
@@ -60,15 +73,27 @@ export const validateBeneficiaryName: Validator<string> = value => {
   }
 };
 
-const TRANSFER_REFERENCE_REGEX = /^[0-9a-zA-Z]+$/;
+const TRANSFER_REFERENCE_REGEX = /^[a-zA-Z0-9-?.+,/':() ]+$/;
 
 export const validateTransferReference: Validator<string> = value => {
   if (value.length > 35) {
     return t("common.form.invalidTransferReference");
   }
 
-  if (!TRANSFER_REFERENCE_REGEX.test(value)) {
+  if (
+    !TRANSFER_REFERENCE_REGEX.test(value) ||
+    value.startsWith("/") ||
+    value.endsWith("/") ||
+    value.includes("//")
+  ) {
     return t("common.form.invalidTransferReference");
+  }
+};
+
+export const validateAccountReasonClose: Validator<string> = value => {
+  const maxLength = 255;
+  if (value.length > maxLength) {
+    return t("common.form.invalidMessage", { maxLength });
   }
 };
 
@@ -263,3 +288,58 @@ export const validatePattern =
         : t("transfer.new.internationalTransfer.beneficiary.form.field.invalid");
     }
   };
+
+export const validateNumeric = (params?: { min?: number; max?: number }): Validator<string> =>
+  combineValidators<string>(validateRequired, value => {
+    // first regex test integer and the second one test float
+    if (!/^-?\d+$/.test(value) && !/^-?\d+\.\d+$/.test(value)) {
+      return t("common.form.number");
+    }
+    const parsed = parseFloat(value);
+    if (params?.min != null && parsed < params.min) {
+      return t("common.form.number.upperThan", { value: params.min });
+    }
+    if (params?.max != null && parsed > params.max) {
+      return t("common.form.number.lowerThan", { value: params.max });
+    }
+  });
+
+export const validateUrl: Validator<string> = combineValidators<string>(validateRequired, value => {
+  const [protocol, remainingUrl] = value.split("://");
+  const regexProtocol = /^(http|https)$/g; // Switch to /^[A-Za-z][A-Za-z0-9+-.]{0,}$/ if we support PKCE one day // https://www.ietf.org/rfc/rfc2396.txt
+  const regexRemainingUrl = /^[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]+$/g;
+
+  // <string>.split("://")[0] always returns a string
+  if (!regexProtocol.test(protocol as string)) {
+    return t("common.form.url.invalidProtocol");
+  }
+
+  // If <string> includes "://", then <string>.split("://")[1] will always returns a string
+  if (!value.includes("://") || !regexRemainingUrl.test(remainingUrl as string)) {
+    return t("common.form.url.invalidFormat");
+  }
+});
+
+const HEX_COLOR_RE = /^[a-fA-F0-9]{6}$/;
+
+export const validateHexColor: Validator<string> = value => {
+  if (!HEX_COLOR_RE.test(value)) {
+    return t("common.form.invalidColor");
+  }
+};
+
+const CMC7_RE = /^\d{31}$/;
+
+export const validateCMC7 = (value: string) => {
+  if (!CMC7_RE.test(value)) {
+    return t("common.form.invalidCMC7");
+  }
+};
+
+const RLMC_RE = /^\d{2}$/;
+
+export const validateRLMC = (value: string) => {
+  if (!RLMC_RE.test(value)) {
+    return t("common.form.invalidRLMC");
+  }
+};

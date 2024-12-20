@@ -31,7 +31,7 @@ const handleRequest = async (
     } else {
       // Prevents having old HTMLs in cache referencing assets that
       // do not longer exist in its files
-      void reply.header("cache-control", `public, max-age=0`);
+      void reply.header("cache-control", `private, max-age=0`);
       if (isStaticAsset) {
         return reply.sendFile(reqPath, path.join(staticPath, appName));
       } else {
@@ -47,6 +47,7 @@ const handleRequest = async (
 export function getProductionRequestHandler() {
   const BANKING_HOST = new URL(env.BANKING_URL).hostname;
   const ONBOARDING_HOST = new URL(env.ONBOARDING_URL).hostname;
+  const PAYMENT_HOST = new URL(env.PAYMENT_URL).hostname;
 
   const handler: RouteHandlerMethod<Http2SecureServer> = (request, reply) => {
     const host = new URL(`${request.protocol}://${request.hostname}`).hostname;
@@ -62,6 +63,9 @@ export function getProductionRequestHandler() {
         break;
       case ONBOARDING_HOST:
         void handleRequest(reqPath, "onboarding", reply);
+        break;
+      case PAYMENT_HOST:
+        void handleRequest(reqPath, "payment", reply);
         break;
       default:
         return reply.code(404).send("404");

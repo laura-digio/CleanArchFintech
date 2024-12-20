@@ -1,10 +1,13 @@
-FROM node:18 AS builder
+FROM node:22 AS builder
 WORKDIR /app
 ADD ./server/ ./
-RUN npm install
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+RUN pnpm install --no-frozen-lockfile
 
-FROM cgr.dev/chainguard/node:latest
+FROM node:22
 WORKDIR /app
 COPY --chown=node:node --from=builder /app ./
-CMD ["/usr/bin/npm", "run", "start-swan"]
+CMD ["npm", "run", "start-swan"]
 EXPOSE 8080

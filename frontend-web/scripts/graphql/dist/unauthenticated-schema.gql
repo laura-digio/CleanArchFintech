@@ -53,11 +53,51 @@ type Account {
   """Updated date"""
   updatedAt: DateTime!
 
-  """List of Virtual IBAN"""
-  virtualIbanEntries(first: Int! = 50, before: String, after: String): VirtualIBANEntryConnection!
+  """
+  List of Virtual IBAN
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  virtualIbanEntries(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
 
-  """List of account membership for this account"""
-  memberships(first: Int! = 50, before: String, after: String, filters: MembershipsFilterInput, orderBy: AccountMembershipOrderByInput): AccountMembershipConnection!
+    """
+    the index (a unique reference in string form) from which you will load the preceding elements
+    """
+    before: String
+
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+  ): VirtualIBANEntryConnection!
+
+  """
+  List of account membership for this account
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  memberships(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
+
+    """
+    the index (a unique reference in string form) from which you will load the preceding elements
+    """
+    before: String
+
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+
+    """a filtering table you can apply to your list of connections"""
+    filters: MembershipsFilterInput
+
+    """an order you can apply to your list of connections"""
+    orderBy: AccountMembershipOrderByInput
+  ): AccountMembershipConnection!
 
   """`true`if a consent is required to fetch new transactions"""
   requiredConsentToFetchNewTransactions: Boolean!
@@ -80,19 +120,29 @@ type Account {
   bankDetails: String
 }
 
+"""
+Account and Requested Card, it the return type of accountByCardToken & accountByCardId;
+"""
+type AccountAndCard {
+  """Account"""
+  account: Account!
+
+  """Requested Card"""
+  cardRequested: Card!
+}
+
 """Account Closed status information"""
 type AccountClosedStatus implements AccountStatusInfo {
   """Account status (always Closed for type AccountClosedStatus)"""
   status: AccountStatus!
 
-  """
-  Reason why the account is suspended
-  @Deprecated
-  """
-  reason: String!
+  """Reason why the account is suspended"""
+  reason: String! @deprecated(reason: "Use `reasonInfo` instead.")
 
   """Reason why the account is currently closed"""
   reasonInfo: CloseAccountStatusReason!
+  closedAt: DateTime!
+  closingAt: DateTime!
 }
 
 """Account Closing status information"""
@@ -100,14 +150,12 @@ type AccountClosingStatus implements AccountStatusInfo {
   """Account status (always Closing for type AccountClosingStatus)"""
   status: AccountStatus!
 
-  """
-  Reason why the account is suspended
-  @Deprecated
-  """
-  reason: String!
+  """Reason why the account is suspended"""
+  reason: String! @deprecated(reason: "Use `reasonInfo` instead.")
 
   """Reason why the account is currently in closing"""
   reasonInfo: CloseAccountStatusReason!
+  closingAt: DateTime!
 }
 
 """
@@ -141,6 +189,11 @@ enum AccountCountry {
 
   """Dutch account with a Dutch IBAN, starting with DU."""
   NLD
+
+  """
+  Italian account with an Italian IBAN, starting with IT (Coming Soon, not supported yet).
+  """
+  ITA
 }
 
 """Implements the Relay Edge interface"""
@@ -165,6 +218,9 @@ type AccountHolder {
   """
   verificationStatus: VerificationStatus!
 
+  """Account holder verification Status information."""
+  verificationStatusInfo: AccountHolderVerificationStatusInfo!
+
   """Account holder type information."""
   info: AccountHolderInfo!
 
@@ -180,14 +236,71 @@ type AccountHolder {
   """Updated date."""
   updatedDate: DateTime!
 
-  """List of accounts owned by the account holder."""
-  accounts(after: String, before: String, first: Int! = 50, orderBy: AccountOrderByInput): AccountConnection!
+  """
+  List of accounts owned by the account holder.
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  accounts(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
 
-  """List of supporting document collection for an account holder"""
-  supportingDocumentCollections(first: Int! = 50, before: String, after: String): SupportingDocumentCollectionConnection!
+    """
+    the index (a unique reference in string form) from which you will load the preceding elements
+    """
+    before: String
 
-  """List of funding limit settings change request for an account holder"""
-  fundingLimitSettingsChangeRequests(first: Int! = 50, before: String, after: String): FundingLimitSettingsChangeRequestConnection!
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+
+    """an order you can apply to your list of connections"""
+    orderBy: AccountOrderByInput
+  ): AccountConnection!
+
+  """
+  List of supporting document collection for an account holder
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  supportingDocumentCollections(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
+
+    """
+    the index (a unique reference in string form) from which you will load the preceding elements
+    """
+    before: String
+
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+
+    """When the list of supporting document collections needs to be filtered"""
+    filters: SupportingDocumentCollectionFilterInput
+  ): SupportingDocumentCollectionConnection!
+
+  """
+  List of funding limit settings change request for an account holder
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  fundingLimitSettingsChangeRequests(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
+
+    """
+    the index (a unique reference in string form) from which you will load the preceding elements
+    """
+    before: String
+
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+  ): FundingLimitSettingsChangeRequestConnection!
 
   """Account holder onboarding"""
   onboarding: Onboarding
@@ -209,7 +322,10 @@ type AccountHolderCompanyInfo implements AccountHolderInfo {
   """Name of the company."""
   name: String!
 
-  """Registration number of the company (SIRET, ...)."""
+  """
+  Registration number of the company (for example, Système d'Identification du Répertoire des ENtreprises [SIREN] in France, ...).
+  - Length must be from 0 to 50 characters.
+  """
   registrationNumber: String
 
   """Registration date of the company."""
@@ -255,22 +371,22 @@ type AccountHolderCompanyInfo implements AccountHolderInfo {
 Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination)).
 """
 type AccountHolderConnection implements Connection {
-  """Total number of element in the list."""
+  """Total number of element in the list"""
   totalCount: Int!
 
-  """Information about the current, the previous and the next page."""
+  """Information about the current, the previous and the next page"""
   pageInfo: PageInfo!
 
-  """AccountHolderEdge list."""
+  """AccountHolderEdge list"""
   edges: [AccountHolderEdge!]!
 }
 
 """Implements the Relay Edge interface."""
 type AccountHolderEdge implements Edge {
-  """Opaque identifier pointing to this node in the pagination mechanism."""
+  """Opaque identifier pointing to this node in the pagination mechanism"""
   cursor: String!
 
-  """The account holder."""
+  """The account holder"""
   node: AccountHolder!
 }
 
@@ -280,17 +396,52 @@ type AccountHolderEnabledStatusInfo implements AccountHolderStatusInfo {
   status: AccountHolderStatus!
 }
 
+"""Filters that can be applied when listing account holders"""
 input AccountHolderFilterInput {
+  """Filter by birth date"""
+  birthDate: String
+
+  """
+  Filter by registration number of the company
+  (for example, Système d'Identification du Répertoire des ENtreprises [SIREN] in France, ...).
+  
+  - Length must be from 0 to 50 characters.
+  """
+  registrationNumber: String
+
+  """Filter by status"""
   status: [AccountHolderStatus!]
+
+  """Filter by type"""
   types: [AccountHolderType!]
+
+  """Filter by verification status"""
   verificationStatus: [VerificationStatus!]
 
-  """Searches company name, first name, last name"""
+  """
+  Search string to look for
+  
+  Search will be performed in following fields:
+   - First name
+   - Last name
+   - Company name
+   - ID
+  """
   search: String
+
+  """
+  Search by first name
+  
+  @deprecated(reason: "use `search` instead")
+  """
   firstName: String
+
+  """
+  Search by last name
+  
+  @deprecated(reason: "use `search` instead")
+  """
   lastName: String
-  birthDate: String
-  registrationNumber: String
 }
 
 """Individual account holder."""
@@ -330,6 +481,11 @@ type AccountHolderNotFoundRejection implements Rejection {
   message: String!
 }
 
+type AccountHolderNotStartedVerificationStatusInfo implements AccountHolderVerificationStatusInfo {
+  """Verification Status of the account holder."""
+  status: VerificationStatus!
+}
+
 """
 Field we can use when ordering that can be applied when listing account holders
 """
@@ -342,6 +498,25 @@ enum AccountHolderOrderByFieldInput {
 input AccountHolderOrderByInput {
   field: AccountHolderOrderByFieldInput
   direction: OrderByDirection
+}
+
+type AccountHolderPendingVerificationStatusInfo implements AccountHolderVerificationStatusInfo {
+  """Verification Status of the account holder."""
+  status: VerificationStatus!
+
+  """ISO Date string at which the account holder status was set to Pending"""
+  pendingAt: DateTime!
+}
+
+type AccountHolderRefusedVerificationStatusInfo implements AccountHolderVerificationStatusInfo {
+  """Verification Status of the account holder."""
+  status: VerificationStatus!
+
+  """ISO Date string at which the account holder status was set to Refused"""
+  refusedAt: DateTime!
+
+  """Reason for which the account holder was refused"""
+  reason: String!
 }
 
 """Account holder status."""
@@ -380,6 +555,34 @@ enum AccountHolderType {
   Company
 }
 
+"""Account Holder Verification Status Information"""
+interface AccountHolderVerificationStatusInfo {
+  """Verification Status of the account holder."""
+  status: VerificationStatus!
+}
+
+type AccountHolderVerifiedVerificationStatusInfo implements AccountHolderVerificationStatusInfo {
+  """Verification Status of the account holder."""
+  status: VerificationStatus!
+
+  """ISO Date string at which the account holder status was set to Verified"""
+  verifiedAt: DateTime!
+}
+
+type AccountHolderWaitingForInformationVerificationStatusInfo implements AccountHolderVerificationStatusInfo {
+  """Verification Status of the account holder."""
+  status: VerificationStatus!
+  verificationRequirements: [VerificationRequirement!]!
+
+  """@deprecated(reason: "Use `waitingForInformationAt` instead")"""
+  WaitingForInformationAt: DateTime! @deprecated
+
+  """
+  ISO Date string at which the account holder status was set to WaitingForInformation
+  """
+  waitingForInformationAt: DateTime!
+}
+
 """Language: ISO 639-1 language code"""
 enum AccountLanguage {
   de
@@ -389,6 +592,7 @@ enum AccountLanguage {
   nl
   es
   pt
+  fi
 }
 
 """
@@ -419,7 +623,7 @@ type AccountMembership {
   """`true` if this account membership can add or canceled beneficiaries"""
   canManageBeneficiaries: Boolean!
 
-  """`true` if this account membership can initiate payments"""
+  """`true` if this account membership can initiate credit transfers"""
   canInitiatePayments: Boolean!
 
   """
@@ -434,6 +638,9 @@ type AccountMembership {
 
   """status of the account membership"""
   statusInfo: AccountMembershipStatusInfo!
+
+  """Unique identifier of the account of the account membership"""
+  accountId: ID!
 
   """account of the account membership"""
   account: Account
@@ -472,6 +679,9 @@ type AccountMembership {
   """Disabled date"""
   disabledAt: DateTime
 
+  """Language of the account membership"""
+  language: AccountLanguage
+
   """account membership's cards"""
   cards(
     first: Int! = 50
@@ -486,7 +696,7 @@ type AccountMembership {
   ): CardConnection!
 }
 
-"""when a user is binded with the error to the account membership"""
+"""when a user is bound with the error to the account membership"""
 type AccountMembershipBindingUserErrorStatusInfo implements AccountMembershipStatusInfo {
   """
   AccountMembership status (always BindingUserError for type AccountMembershipBindingUserErrorStatusInfo)
@@ -494,25 +704,30 @@ type AccountMembershipBindingUserErrorStatusInfo implements AccountMembershipSta
   status: AccountMembershipStatus!
 
   """
-  `true` if the first name of the user binded doesn't match with the invitation
+  `true` if the first name of the bound user doesn't match with the invitation
   """
   firstNameMatchError: Boolean!
+
+  """
+  `true` if the email of the bound user doesn't match with the invitation
+  """
+  emailVerifiedMatchError: Boolean!
 
   """`true` if Swan hasn't verified the user's identity"""
   idVerifiedMatchError: Boolean!
 
   """
-  `true` if the last name of the user binded doesn't match with the invitation
+  `true` if the last name of the bound user doesn't match with the invitation
   """
   lastNameMatchError: Boolean!
 
   """
-  `true` if the phone number of the user binded doesn't match with the invitation
+  `true` if the phone number of the bound user doesn't match with the invitation
   """
   phoneNumberMatchError: Boolean!
 
   """
-  `true` if the birth date of the user binded doesn't match with the invitation
+  `true` if the birth date of the bound user doesn't match with the invitation
   """
   birthDateMatchError: Boolean!
 
@@ -587,7 +802,7 @@ type AccountMembershipEnabledStatusInfo implements AccountMembershipStatusInfo {
 }
 
 """
-when a new account membership is invited and there is no user binded yet
+when a new account membership is invited and there is no user bound yet
 """
 type AccountMembershipInvitationSentStatusInfo implements AccountMembershipStatusInfo {
   """
@@ -617,6 +832,10 @@ type AccountMembershipNotReadyToBeBoundRejection implements Rejection {
   message: String!
 }
 
+type AccountMembershipNotReadyToBeUpdatedRejection {
+  message: String!
+}
+
 """
 Field we can use when ordering that can be applied when listing account memberships
 """
@@ -631,9 +850,7 @@ input AccountMembershipOrderByInput {
   direction: OrderByDirection
 }
 
-"""
-Filters that can be applied when listing accounts (Only applied in user context)
-"""
+"""Filters that can be applied when listing account memberships"""
 input AccountMembershipsFilterInput {
   """
   `true` if this account membership can manage cards for himself or to the memberships he manages
@@ -655,26 +872,40 @@ input AccountMembershipsFilterInput {
   """Account memberships status/statuses we're looking for"""
   status: [AccountMembershipStatus!]
 
-  """Filtered by email"""
+  """
+  Search by email
+  
+  @deprecated(reason: "use `search` instead")
+  """
   email: String
 
-  """Filtered by first name"""
+  """
+  Search by first name
+  
+  @deprecated(reason: "use `search` instead")
+  """
   firstName: String
 
-  """Filtered by last name"""
+  """
+  Search by last name
+  
+  @deprecated(reason: "use `search` instead")
+  """
   lastName: String
 
-  """Searches email, first name, last name, and id"""
+  """
+  Search string to look for
+  
+  Search will be performed in following fields:
+   - First name
+   - Last name
+   - Email
+   - ID
+  """
   search: String
-}
 
-"""List of account memberships permission"""
-enum AccountMembershipsPermission {
-  canInitiatePayments
-  canManageAccountMembership
-  canManageCards
-  canManageBeneficiaries
-  canViewAccount
+  """Filter by account"""
+  accountId: String
 }
 
 """AccountMembership enabled"""
@@ -685,7 +916,7 @@ enum AccountMembershipStatus {
   """when the account membership is invited"""
   InvitationSent
 
-  """when the user binded with errors to the account membership"""
+  """when the user bound with errors to the account membership"""
   BindingUserError
 
   """when the account membership is enabled"""
@@ -768,14 +999,15 @@ type AccountSuspendedStatus implements AccountStatusInfo {
   """Account status (always Suspended for type AccountSuspendedStatus)"""
   status: AccountStatus!
 
-  """
-  Reason why the account is suspended
-  @Deprecated
-  """
-  reason: String!
+  """Reason why the account is suspended"""
+  reason: String! @deprecated(reason: "Use `reasonInfo` instead.")
 
   """Reason why the account is currently suspend"""
   reasonInfo: SuspendAccountStatusReason!
+}
+
+type ActionNotAllowedRejection implements Rejection {
+  message: String!
 }
 
 type ActiveMerchantPaymentLinkStatusInfo implements MerchantPaymentLinkStatusInfo {
@@ -786,6 +1018,30 @@ type ActiveMerchantPaymentLinkStatusInfo implements MerchantPaymentLinkStatusInf
   By default the payment link expires 120 days after it was created.
   """
   expiresAt: DateTime!
+}
+
+input AddCardPaymentMandateInput {
+  """Payment Method ID generated by Swan"""
+  paymentMethodId: ID!
+
+  """Payment Link related to the Card Payment Mandate"""
+  paymentLinkId: ID!
+
+  """???"""
+  token: String!
+
+  """Determines whether the payment mandate is a one-off or recurrent"""
+  sequence: PaymentMandateSequence!
+}
+
+"""Union type return by the addCardPaymentMandate mutation"""
+union AddCardPaymentMandatePayload = AddCardPaymentMandateSuccessPayload | InternalErrorRejection | NotFoundRejection | PaymentMethodNotCompatibleRejection | MerchantProfileWrongStatusRejection | AlreadyCompletedPaymentLinkRejection | ExpiredPaymentLinkRejection | PaymentMandateReferenceAlreadyUsedRejection
+
+"""
+Return type in case of a successful response of the initiateMerchantSddPaymentCollectionFromPaymentLink mutation
+"""
+type AddCardPaymentMandateSuccessPayload {
+  paymentMandate: CardPaymentMandate!
 }
 
 """
@@ -861,19 +1117,19 @@ type AddressInformation {
 """Address"""
 input AddressInformationInput {
   """Address"""
-  addressLine1: String!
+  addressLine1: String
 
   """Address"""
   addressLine2: String
 
   """City"""
-  city: String!
+  city: String
 
   """Country"""
   country: CCA3!
 
   """Postal code"""
-  postalCode: String!
+  postalCode: String
 
   """State"""
   state: String
@@ -914,13 +1170,17 @@ input AddSepaDirectDebitPaymentMandateFromPaymentLinkInput {
 }
 
 """Union type return by the addSepaDirectDebitPaymentMandate mutation"""
-union AddSepaDirectDebitPaymentMandateFromPaymentLinkPayload = AddSepaDirectDebitPaymentMandateFromPaymentLinkSuccessPayload | ForbiddenRejection | NotFoundRejection | DebtorAccountNotAllowedRejection | DebtorAccountClosedRejection | SchemeWrongRejection | PaymentMandateReferenceAlreadyUsedRejection | ValidationRejection | PaymentMethodNotCompatibleRejection | InternalErrorRejection
+union AddSepaDirectDebitPaymentMandateFromPaymentLinkPayload = AddSepaDirectDebitPaymentMandateFromPaymentLinkSuccessPayload | ForbiddenRejection | NotFoundRejection | DebtorAccountNotAllowedRejection | MerchantProfileNotValidRejection | IBANNotValidRejection | IBANNotReachableRejection | DebtorAccountClosedRejection | SchemeWrongRejection | PaymentMandateReferenceAlreadyUsedRejection | ValidationRejection | PaymentMethodNotCompatibleRejection | InternalErrorRejection
 
 """
 Return type in case of a successful response of the addSepaDirectDebitPaymentMandateFromPaymentLink mutation
 """
 type AddSepaDirectDebitPaymentMandateFromPaymentLinkSuccessPayload {
   paymentMandate: SEPAPaymentDirectDebitMandate!
+}
+
+type AlreadyCompletedPaymentLinkRejection implements Rejection {
+  message: String!
 }
 
 """Rejection returned if card already has a valid Physical Card"""
@@ -1016,6 +1276,27 @@ type BadRequestRejection implements Rejection {
   message: String!
 }
 
+"""Basic Physical Card Info"""
+type BasicPhysicalCardInfo {
+  """Physical Card expiration date  with MM/YY string format"""
+  expiryDate: String
+
+  """Offline Spending limit defined by Swan"""
+  offlineSpendingLimit: Amount!
+
+  """Masked Card Number"""
+  cardMaskedNumber: String!
+
+  """Custom Options"""
+  customOptions: PhysicalCardCustomOptions!
+
+  """Unique identifier present on physical card"""
+  identifier: String
+
+  """`true` if physical card is expired"""
+  isExpired: Boolean!
+}
+
 """Bank Identifier Code"""
 scalar BIC
 
@@ -1041,21 +1322,6 @@ enum BusinessActivity {
   Transportation
 }
 
-"""CanceledMerchantPaymentMethodStatusInfo"""
-type CanceledMerchantPaymentMethodStatusInfo implements MerchantPaymentMethodStatusInfo {
-  status: MerchantPaymentMethodStatus!
-
-  """Merchant Payment Method canceled date"""
-  canceledAt: Date!
-}
-
-"""CanceledMerchantProfileStatusInfo"""
-type CanceledMerchantProfileStatusInfo implements MerchantProfileStatusInfo {
-  status: MerchantProfileStatus!
-  canceledAt: Date!
-  enabledAt: Date
-}
-
 """Rejection returned when the Physical Card cannot be activated"""
 type CannotActivatePhysicalCardRejection implements Rejection {
   message: String!
@@ -1067,6 +1333,27 @@ type Card {
   """Unique identifier of a card"""
   id: ID!
 
+  """
+  Digital Cards linked to this card
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  digitalCards(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
+
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+
+    """an order you can apply to your list of connections"""
+    orderBy: DigitalCardOrderByInput
+
+    """a filtering table you can apply to your list of connections"""
+    filters: DigitalCardFiltersInput
+  ): DigitalCardConnection!
+
   """Type of a card"""
   type: CardType!
 
@@ -1077,7 +1364,7 @@ type Card {
   updatedAt: DateTime!
 
   """
-  Account membership to define the card holder and the account linked to the card.
+  Account membership to define the cardholder and the account linked to the card.
   """
   accountMembership: AccountMembership!
 
@@ -1115,7 +1402,7 @@ type Card {
   """Periodic Spending limit list"""
   spendingLimits: [SpendingLimit!]
 
-  """Physical card if the card holder has ordered one"""
+  """Physical card if the cardholder has ordered one"""
   physicalCard: PhysicalCard
 
   """Masked Card Number"""
@@ -1132,18 +1419,6 @@ type Card {
 
   """Issuing Country"""
   issuingCountry: CCA3!
-
-  """Digital Cards linked to this card"""
-  digitalCards(
-    first: Int! = 50
-    after: String
-
-    """When the list of elements needs to be ordered"""
-    orderBy: DigitalCardOrderByInput
-
-    """When the list of elements needs to be filtered"""
-    filters: DigitalCardFiltersInput
-  ): DigitalCardConnection!
 }
 
 """Card Canceled Status Information"""
@@ -1293,6 +1568,14 @@ input CardFiltersInput {
   accountId: String
 }
 
+enum CardFundingType {
+  """Default funding type for cards"""
+  Debit
+
+  """Credit funding type for cards"""
+  DeferredDebit
+}
+
 type CardInfo {
   panIframeUrl: String!
   expiryDateIframeUrl: String!
@@ -1347,6 +1630,9 @@ type CardMerchantPaymentMethod implements MerchantPaymentMethod {
 
   """Rolling Reserve applied to the Merchant Payment Method"""
   rollingReserve: RollingReserve
+
+  """Reason of rejection when the status is Rejected"""
+  rejectReason: MerchantPaymentMethodCardRejectReason
 }
 
 """
@@ -1370,6 +1656,11 @@ input CardOrderByInput {
   direction: OrderByDirection
 }
 
+type CardPaymentMandate {
+  """Unique identifier of the Card Payment Mandate"""
+  id: ID!
+}
+
 type CardPINInfos {
   urlToCall: String!
   requestRef: String!
@@ -1383,6 +1674,12 @@ type CardPINInfos {
 input CardPINInfosInput {
   cardId: String!
   requestId: String!
+}
+
+"""Location where the card should be printed from"""
+enum CardPrintingHub {
+  France
+  Spain
 }
 
 """when the card is in the process of being ready to use"""
@@ -1404,6 +1701,9 @@ type CardProduct {
   defaultCardProduct: Boolean!
   individualSpendingLimit: SpendingLimit!
   companySpendingLimit: SpendingLimit!
+
+  """Card printing hub"""
+  cardPrintingHub: CardPrintingHub
 }
 
 """Card design of a Card Product"""
@@ -1696,6 +1996,9 @@ enum CloseAccountReasonType {
 
   """Inactivity"""
   Inactivity
+
+  """Capital Deposit Reason"""
+  CapitalDepositReason
 }
 
 """
@@ -1852,6 +2155,12 @@ type CompleteDigitalCard implements DigitalCard {
   In this type the status will be either ConsentPending or Pending
   """
   statusInfo: CompleteDigitalCardStatusInfo!
+
+  """The project ID"""
+  projectId: ID!
+
+  """The card contract ID"""
+  cardContractId: ID!
 }
 
 """Complete Digital Card Status"""
@@ -1943,6 +2252,15 @@ type Consent {
 
   """unique hash of the consent"""
   challenge: String
+
+  """date when the consent is accepted"""
+  acceptedAt: DateTime
+
+  """date when the consent is refused"""
+  refusedAt: DateTime
+
+  """date when the consent is canceled"""
+  canceledAt: DateTime
 }
 
 """
@@ -2046,6 +2364,12 @@ enum ConsentPurpose {
 
   """when the consent is a multiple consent"""
   ConsentToMultipleConsents
+
+  """when returning a transaction for direct debit"""
+  ReturnTransactionForDirectDebit
+
+  """when returning a transaction for international credit transfer"""
+  ReturnTransactionForInternationalCreditTransfer
 }
 
 """Status of a consent"""
@@ -2059,8 +2383,11 @@ enum ConsentStatus {
   """when the operation is committing"""
   OperationCommitting
 
-  """when the user credentials were refused"""
-  CredentialRefused
+  """
+  when the user credentials were refused
+  @deprecated this status has never been used and will be removed in the following months
+  """
+  CredentialRefused @deprecated
 
   """when the consent is created"""
   Created
@@ -2112,6 +2439,17 @@ type DebtorAccountNotAllowedRejection implements Rejection {
   message: String!
 }
 
+input DeleteSupportingDocumentInput {
+  """Id of the supporting document to delete"""
+  id: ID!
+}
+
+union DeleteSupportingDocumentPayload = DeleteSupportingDocumentSuccessPayload | ForbiddenRejection | InternalErrorRejection | SupportingDocumentCollectionNotFoundRejection | SupportingDocumentCollectionStatusDoesNotAllowDeletionRejection | SupportingDocumentNotFoundRejection | SupportingDocumentStatusDoesNotAllowDeletionRejection | ValidationRejection
+
+type DeleteSupportingDocumentSuccessPayload {
+  id: String!
+}
+
 """Device"""
 type Device {
   """The type of device. It can be a Phone, Tablet, Watch"""
@@ -2143,6 +2481,12 @@ interface DigitalCard {
 
   """Wallet Provider (ApplePay, GooglePay ...)"""
   walletProvider: WalletProvider!
+
+  """The project ID"""
+  projectId: ID!
+
+  """The card contract ID"""
+  cardContractId: ID!
 }
 
 """Digital Card Canceled Status Information"""
@@ -2311,6 +2655,12 @@ type DisabledMerchantPaymentMethodStatusInfo implements MerchantPaymentMethodSta
   disabledAt: Date!
 }
 
+"""DisabledMerchantProfileStatusInfo"""
+type DisabledMerchantProfileStatusInfo implements MerchantProfileStatusInfo {
+  status: MerchantProfileStatus!
+  disabledAt: Date!
+}
+
 """
 Edge type containing the node and cursor. The node is not defined in the interface because generic is not supported by GraphQL
 but all implementation contains its own node property according to the paginated type.
@@ -2372,10 +2722,20 @@ type ExpiredMerchantPaymentLinkStatusInfo implements MerchantPaymentLinkStatusIn
   expiredAt: DateTime!
 }
 
+type ExpiredPaymentLinkRejection implements Rejection {
+  message: String!
+}
+
 type ExternalAccountAlreadyExistsRejection implements Rejection {
   iban: String!
   accountHolderId: String!
   message: String!
+}
+
+type FailedThreeDs {
+  status: ThreeDsStatus!
+  reason: String!
+  code: String!
 }
 
 enum FieldValidationError {
@@ -2461,10 +2821,10 @@ type FundingLimitSettingsChangeRequestEdge implements Edge {
 Filters that can be applied when listing funding limit settings change requests
 """
 input FundingLimitSettingsChangeRequestFiltersInput {
-  """The ids of the funding limit settings change requests"""
+  """Filter by IDs"""
   id: [String!]
 
-  """Status we want to filter on"""
+  """Filter by status"""
   status: [FundingLimitSettingsChangeRequestStatus!]
 }
 
@@ -2610,41 +2970,6 @@ type IdentificationLevels {
   expert: Boolean!
 }
 
-"""Identification status"""
-enum IdentificationStatus {
-  """The user hasn't started the identity verification process yet."""
-  Uninitiated
-
-  """
-  The user has gone through the identity verification process, but we are still processing their information.
-  """
-  Processing
-
-  """
-  The user has gone through the identity verification process, and we have determined that their identity is valid.
-  The user now needs to go through the QES process to complete their identification.
-  """
-  ReadyToSign
-
-  """
-  The user has gone through the identity verification process, and we have determined that their identity is valid.
-  """
-  ValidIdentity
-
-  """
-  The user has gone through the identity verification process, but we were unable to determine if their
-  identity is valid because the quality of the provided documents was insufficient.
-  The user will have to start a new identification, which will update this status to `Processing`.
-  """
-  InsufficientDocumentQuality
-
-  """
-  The user has gone through the identity verification process, but we have determined that their identity is invalid.
-  The user will have to start a new identification, which will update this status to `Processing`.
-  """
-  InvalidIdentity
-}
-
 """
 Rejection returned if identity and the account memberships are already bind
 """
@@ -2716,6 +3041,9 @@ type IndividualUltimateBeneficialOwner {
 
   """Individual beneficial owner title (Mr/Ms)"""
   title: TitleEnum
+
+  """Ultimate beneficial owner's identity document details"""
+  identityDocumentDetails: UBOIdentityDocumentDetails
 }
 
 """Define the type of the UBO"""
@@ -2731,11 +3059,11 @@ input IndividualUltimateBeneficialOwnerInput {
   firstName: String
 
   """
-  Individual beneficial owner  last name. Length must be from 0 to 100 characters
+  Individual beneficial owner last name. Length must be from 0 to 100 characters
   """
   lastName: String
 
-  """Individual birth date. Must be a valid date"""
+  """Individual birth date. Must be a valid date in the YYYY/MM/DD format"""
   birthDate: String
 
   """Individual birth city. Length must be from 0 to 100 characters"""
@@ -2752,7 +3080,7 @@ input IndividualUltimateBeneficialOwnerInput {
   """Define UBO is an Indirect Owner"""
   indirect: Boolean
 
-  """Define UBO is an Direct Owner"""
+  """Define UBO is a Direct Owner"""
   direct: Boolean
 
   """
@@ -2761,16 +3089,19 @@ input IndividualUltimateBeneficialOwnerInput {
   totalCapitalPercentage: Float
 
   """Define UBO is a Legal Representative"""
-  type: IndividualUltimateBeneficialOwnerTypeEnum!
+  type: IndividualUltimateBeneficialOwnerTypeEnum
 
   """Individual beneficial owner Tax or Identification Number"""
   taxIdentificationNumber: String
 
-  """Individual beneficial owner residency Address"""
-  residencyAddress: AddressInformationInput
+  """Individual beneficial owner residency address"""
+  residencyAddress: ResidencyAddressInput
 
   """Individual ultimate beneficial owner title (Mr/Ms)"""
   title: TitleEnum
+
+  """Ultimate beneficial owner's identity document details"""
+  identityDocumentDetails: UBOIdentityDocumentDetailsInput
 }
 
 """Individual Ultimate beneficial owner nature"""
@@ -2918,6 +3249,14 @@ type LegalRepresentativeAccountMembershipCannotBeSuspendedRejection implements R
   message: String!
 }
 
+type LegalRepresentativeEmailCannotBeUpdatedRejection {
+  message: String!
+}
+
+type LegalRepresentativePermissionsCannotBeUpdatedRejection {
+  message: String!
+}
+
 type MaskedCardInfo {
   maskedPan: String!
   maskedExpiryDate: String!
@@ -2925,9 +3264,7 @@ type MaskedCardInfo {
   cardHolderName: String!
 }
 
-"""
-Filters that can be applied when listing accounts (Only applied in user context)
-"""
+"""Filters that can be applied when listing account memberships"""
 input MembershipsFilterInput {
   """
   `true` if this account membership can manage cards for himself or to the memberships he manages
@@ -2949,17 +3286,187 @@ input MembershipsFilterInput {
   """Account memberships status/statuses we're looking for"""
   status: [AccountMembershipStatus!]
 
-  """Filtered by email"""
+  """
+  Search by email
+  
+  @deprecated(reason: "use `search` instead")
+  """
   email: String
 
-  """Filtered by first name"""
+  """
+  Search by first name
+  
+  @deprecated(reason: "use `search` instead")
+  """
   firstName: String
 
-  """Filtered by last name"""
+  """
+  Search by last name
+  
+  @deprecated(reason: "use `search` instead")
+  """
   lastName: String
 
-  """Searches email, first name, last name, and id"""
+  """
+  Search string to look for
+  
+  Search will be performed in following fields:
+   - First name
+   - Last name
+   - Email
+   - ID
+  """
   search: String
+}
+
+"""
+The different balances of the payment. Use this to understand in details what actions have been taken on the payment and what actions can be taken moving forward.
+"""
+type MerchantBalance {
+  """The amount that can be canceled on this payment"""
+  availableToCancel: Amount!
+
+  """The amount that can be captured on this payment"""
+  availableToCapture: Amount!
+
+  """The amount that can be refunded on this payment"""
+  availableToRefund: Amount!
+
+  """The amount authorised"""
+  totalAuthorized: Amount!
+
+  """The amount canceled"""
+  totalCanceled: Amount!
+
+  """The amount captured"""
+  totalCaptured: Amount!
+
+  """The amount disputed"""
+  totalDisputed: Amount!
+
+  """The amount refunded"""
+  totalRefunded: Amount!
+}
+
+"""Rejection returned when the Merchant Card Payment is declined"""
+type MerchantCardPaymentDeclinedRejection implements Rejection {
+  message: String!
+}
+
+type MerchantPayment {
+  """unique identifier of a merchant payment"""
+  id: ID!
+
+  """status information"""
+  statusInfo: MerchantPaymentStatusInfo!
+
+  """amount"""
+  amount: Amount!
+
+  """unique identifier of the payment mandate associated to the payment"""
+  paymentMandateId: ID!
+
+  """unique identifier of the payment link associated to the payment"""
+  paymentLinkId: ID
+
+  """unique identifier of the merchant profile associated to the payment"""
+  merchantProfileId: ID!
+
+  """unique identifier of the payment method associated to the payment"""
+  paymentMethodId: ID!
+  balance: MerchantBalance!
+
+  """Label"""
+  label: String
+  reference: String
+
+  """
+  an arbitrary identifier that was defined by you when you created this payment
+  """
+  externalReference: String
+
+  """The billing address associated to the payment"""
+  billingAddress: Address
+  threeDS: ThreeDS
+
+  """Created date"""
+  createdAt: DateTime!
+
+  """Updated date"""
+  updatedAt: DateTime!
+
+  """Authorized date"""
+  authorizedAt: DateTime
+
+  """Canceled date"""
+  canceledAt: DateTime
+
+  """Captured date"""
+  capturedAt: DateTime
+
+  """Rejected date"""
+  rejectedAt: DateTime
+
+  """Refunded date"""
+  refundedAt: DateTime
+
+  """Disputed date"""
+  disputedAt: DateTime
+}
+
+"""Merchant Payment status authorized"""
+type MerchantPaymentAuthorized implements MerchantPaymentStatusInfo {
+  """status of the merchant payment"""
+  status: MerchantPaymentStatus!
+}
+
+"""Merchant Payment status captured"""
+type MerchantPaymentCaptured implements MerchantPaymentStatusInfo {
+  """status of the merchant payment"""
+  status: MerchantPaymentStatus!
+}
+
+type MerchantPaymentConnection implements Connection {
+  """Information about the current, the previous and the next page"""
+  pageInfo: PageInfo!
+
+  """Edge list"""
+  edges: [MerchantPaymentEdge!]!
+
+  """Total number of element in the list"""
+  totalCount: Int!
+}
+
+type MerchantPaymentEdge implements Edge {
+  node: MerchantPayment!
+
+  """Opaque identifier pointing to this node in the pagination mechanism"""
+  cursor: String!
+}
+
+input MerchantPaymentFiltersInput {
+  """To filter on some Merchant Payment Link Status (all if empty)"""
+  status: [MerchantPaymentStatus!]
+
+  """To filter on some Merchant Payment Method Type (all if empty)"""
+  paymentMethod: [MerchantPaymentMethodType!]
+
+  """To filter after a createdAt value"""
+  isAfterCreatedAt: DateTime
+
+  """To filter before a createdAt value"""
+  isBeforeCreatedAt: DateTime
+
+  """To filter on some text occurrences (words or ids)"""
+  search: String
+  amountSmallerThan: AmountValue
+  amountGreaterThan: AmountValue
+}
+
+"""Merchant Payment status initiated"""
+type MerchantPaymentInitiated implements MerchantPaymentStatusInfo {
+  """status of the merchant payment"""
+  status: MerchantPaymentStatus!
 }
 
 type MerchantPaymentLink {
@@ -2978,22 +3485,22 @@ type MerchantPaymentLink {
   """The Merchant Profile to link this Payment Link to"""
   merchantProfile: MerchantProfile!
 
-  """Amount to be paid to sucessfully complete the payment."""
+  """Amount to be paid to successfully complete the payment."""
   amount: Amount!
 
   """
   Merchant Website URL to redirect the user to when the payment is completed.
   """
-  redirectUrl: String!
+  redirectUrl: String
 
   """URL to redirect the user to if they cancel their payment"""
-  cancelRedirectUrl: String!
+  cancelRedirectUrl: String
 
   """
   Controls if the payment mandate created from this payment link is for one-time use or can be reused
   This is applicable for card and SEPA Direct Debit payment methods only.
   """
-  sequence: PaymentLinkSequenceType!
+  sequence: PaymentMandateSequence!
 
   """
   The customer billing Address
@@ -3047,6 +3554,60 @@ type MerchantPaymentLink {
   If the array is empty Swan will allow all the payment methods that are enabled for the merchant profile (except for Check and Internal Direct Debit)
   """
   paymentMethods: [MerchantPaymentMethod!]!
+  createdAt: DateTime!
+}
+
+type MerchantPaymentLinkConnection implements Connection {
+  """Information about the current, the previous and the next page"""
+  pageInfo: PageInfo!
+
+  """Edge list"""
+  edges: [MerchantPaymentLinkEdge!]!
+
+  """Total number of element in the list"""
+  totalCount: Int!
+}
+
+type MerchantPaymentLinkEdge implements Edge {
+  node: MerchantPaymentLink!
+
+  """Opaque identifier pointing to this node in the pagination mechanism"""
+  cursor: String!
+}
+
+input MerchantPaymentLinkFiltersInput {
+  """To filter on some Merchant Payment Link Status (all if empty)"""
+  status: [MerchantPaymentLinkStatus!]
+
+  """To filter after a createdAt value"""
+  isAfterCreatedAt: DateTime
+
+  """To filter before a createdAt value"""
+  isBeforeCreatedAt: DateTime
+
+  """To filter on some text occurrences (words or ids)"""
+  search: String
+
+  """
+  To filter payment links having an amount smaller than the given criteria
+  """
+  amountSmallerThan: AmountValue
+
+  """
+  To filter payment links having an amount greater than the given criteria
+  """
+  amountGreaterThan: AmountValue
+}
+
+enum MerchantPaymentLinkOrderByFieldInput {
+  createdAt
+  label
+  url
+}
+
+input MerchantPaymentLinkOrderByInput {
+  field: MerchantPaymentLinkOrderByFieldInput
+  direction: OrderByDirection
 }
 
 enum MerchantPaymentLinkStatus {
@@ -3058,9 +3619,6 @@ enum MerchantPaymentLinkStatus {
 
   """The customer completed the payment."""
   Completed
-
-  """The customer cancel the payment."""
-  Canceled
 }
 
 interface MerchantPaymentLinkStatusInfo {
@@ -3095,6 +3653,13 @@ interface MerchantPaymentMethod {
   rollingReserve: RollingReserve
 }
 
+"""The different rejection reasons for a CardMerchantPaymentMethod"""
+enum MerchantPaymentMethodCardRejectReason {
+  SwanRefused
+  UnsupportedBusiness
+  SwanTechnicalErrorOccurred
+}
+
 """Rejection returned when the Merchant Payment Method is not active"""
 type MerchantPaymentMethodNotActiveRejection implements Rejection {
   paymentMethodIds: [String!]
@@ -3107,7 +3672,6 @@ enum MerchantPaymentMethodStatus {
   Enabled
   Rejected
   Disabled
-  Canceled
   Suspended
 }
 
@@ -3125,6 +3689,50 @@ enum MerchantPaymentMethodType {
   SepaDirectDebitB2b
   Check
   Card
+}
+
+interface MerchantPaymentMethodUpdateRequest {
+  id: ID!
+}
+
+type MerchantPaymentMethodWrongStatusRejection implements Rejection {
+  message: String!
+}
+
+enum MerchantPaymentOrderByFieldInput {
+  label
+  createdAt
+  externalReference
+  status
+  amount
+}
+
+input MerchantPaymentOrderByInput {
+  field: MerchantPaymentOrderByFieldInput
+  direction: OrderByDirection
+}
+
+"""Merchant Payment status rejected"""
+type MerchantPaymentRejected implements MerchantPaymentStatusInfo {
+  """status of the merchant payment"""
+  status: MerchantPaymentStatus!
+
+  """rejected reason"""
+  reason: String!
+}
+
+"""Merchant Payment status"""
+enum MerchantPaymentStatus {
+  Initiated
+  Authorized
+  Captured
+  Rejected
+}
+
+"""Merchant Payment Status Information"""
+interface MerchantPaymentStatusInfo {
+  """status of the merchant payment"""
+  status: MerchantPaymentStatus!
 }
 
 """Merchant Profile"""
@@ -3161,16 +3769,31 @@ type MerchantProfile {
   merchantPaymentMethods: [MerchantPaymentMethod!]
 
   """Updates Requested associated"""
-  requestedMerchantProfileUpdates: [RequestMerchantProfileUpdate!]
+  requestedMerchantProfileUpdates: [RequestMerchantProfileUpdate!] @deprecated
+
+  """Update Requested associated"""
+  requestMerchantProfileUpdate: RequestMerchantProfileUpdate
 
   """expected average basket value."""
   expectedAverageBasket: Amount!
+
+  """
+  Your accent color, used in white label interfaces.
+  This color would also be inherited in the Swan Merchant Payment page.
+  """
+  accentColor: String
 
   """created date"""
   createdAt: DateTime!
 
   """updated date"""
   updatedAt: DateTime!
+  merchantPaymentLinks(first: Int! = 50, after: String, orderBy: MerchantPaymentLinkOrderByInput, filters: MerchantPaymentLinkFiltersInput): MerchantPaymentLinkConnection
+  merchantPayments(first: Int! = 50, after: String, orderBy: MerchantPaymentOrderByInput, filters: MerchantPaymentFiltersInput): MerchantPaymentConnection
+}
+
+type MerchantProfileNotValidRejection implements Rejection {
+  message: String!
 }
 
 """Merchant Profile Statuses"""
@@ -3184,11 +3807,11 @@ enum MerchantProfileStatus {
   """Rejected"""
   Rejected
 
-  """Canceled"""
-  Canceled
-
   """Suspended"""
   Suspended
+
+  """Disabled"""
+  Disabled
 }
 
 """Merchant Profile Status Information"""
@@ -3203,6 +3826,10 @@ type MerchantProfileWrongStatusRejection implements Rejection {
   message: String!
   currentStatus: MerchantProfileStatus!
   expectedStatus: MerchantProfileStatus!
+}
+
+type MissingBirthDateRejection {
+  message: String!
 }
 
 """Rejection returned when mandatory fields are missing from the call."""
@@ -3243,12 +3870,30 @@ type Mutation {
   unauthenticatedUpdateIndividualOnboarding(input: UnauthenticatedUpdateIndividualOnboardingInput!): UnauthenticatedUpdateIndividualOnboardingPayload!
 
   """
+  Delete a supporting document, in case uploaded file is not what was wanted. This action can not be undone.
+  
+  This mutation can only be used on an "Uploaded" supporting document of a "WaitingForDocument" supporting document collection.
+  
+  *This mutation is restricted to a Project access token ([Learn More](https://docs.swan.io/api/authentication))*
+  """
+  deleteSupportingDocument(input: DeleteSupportingDocumentInput!): DeleteSupportingDocumentPayload!
+
+  """
   Generate and return a presigned URL to upload a unique file for the supporting document collection
   
   *This mutation is restricted to a Project access token ([Learn More](https://docs.swan.io/api/authentication))*
   """
   generateSupportingDocumentUploadUrl(input: GenerateSupportingDocumentUploadUrlInput!): GenerateSupportingDocumentUploadUrlPayload!
+
+  """
+  Ask for Swan's compliance team to review given supporting document collection.
+  
+  *This mutation is restricted to a Project access token ([Learn More](https://docs.swan.io/api/authentication))*
+  """
+  requestSupportingDocumentCollectionReview(input: RequestSupportingDocumentCollectionReviewInput): RequestSupportingDocumentCollectionReviewPayload!
+  unauthenticatedAddCardPaymentMandate(input: AddCardPaymentMandateInput!): AddCardPaymentMandatePayload!
   addSepaDirectDebitPaymentMandateFromPaymentLink(input: AddSepaDirectDebitPaymentMandateFromPaymentLinkInput!): AddSepaDirectDebitPaymentMandateFromPaymentLinkPayload!
+  unauthenticatedInitiateMerchantCardPaymentFromPaymentLink(input: UnauthenticatedInitiateMerchantCardPaymentFromPaymentLinkInput!): UnauthenticatedInitiateMerchantCardPaymentFromPaymentLinkPayload!
   unauthenticatedInitiateMerchantSddPaymentCollectionFromPaymentLink(input: UnauthenticatedInitiateMerchantSddPaymentCollectionFromPaymentLinkInput!): UnauthenticatedInitiateMerchantSddPaymentCollectionFromPaymentLinkPayload!
 }
 
@@ -3322,7 +3967,8 @@ type Onboarding {
   finalizedAt: DateTime
 
   """
-  Language of the onboarding process. This consists of a 2-3 letter base language tag representing the language, optionally followed by additional subtags separated by '-'. The most common extra information is the country or region variant (like 'en-US' or 'fr-CA') or the type of alphabet to use (like 'sr-Latn'). Other variants like the type of orthography ('de-DE-1996') are usually not used in the context of this header. [Learn More](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language)
+  Language of the onboarding process.
+  - Accepted languages: `["en", "fr", "nl", "de", "it", "es", "pt", "fi"]`
   """
   language: String
 
@@ -3335,7 +3981,7 @@ type Onboarding {
   """
   Redirect the legal representative of a new account holder to this URL to start the onboarding process
   """
-  onboardingUrl: String!
+  onboardingUrl: String
 
   """Current computed state of onboarding"""
   onboardingState: OnboardingState!
@@ -3383,10 +4029,13 @@ type OnboardingCompanyAccountHolderInfo implements OnboardingAccountHolderInfo {
   """
   type: AccountHolderType!
 
-  """name of the company"""
+  """Name of the company."""
   name: String
 
-  """registration number of the company (SIRET, ...)"""
+  """
+  Registration number of the company (for example, Système d'Identification du Répertoire des ENtreprises [SIREN] in France, ...).
+  - Length must be from 0 to 50 characters.
+  """
   registrationNumber: String
 
   """legal form of the company (SAS, SCI, SASU, ...)"""
@@ -3461,17 +4110,31 @@ type OnboardingEdge implements Edge {
 
 """Filters that can be applied when listing onboardings"""
 input OnboardingFiltersInput {
-  """Type/Types we want to filter on"""
-  types: [AccountHolderType!]
-
-  """Email we want to filter on"""
+  """
+  Search by email
+  
+  @deprecated(reason: "use `search` instead")
+  """
   email: String
 
-  """Searches company name, first name, last name"""
+  """
+  Search string to look for
+  
+  Search will be performed in following fields:
+   - Account holder's first name
+   - Account holder's last name
+   - Account holder's company name
+   - Account holder's ID
+   - Email
+   - ID
+  """
   search: String
 
-  """Status we want to filter on"""
+  """Filter by status"""
   status: [OnboardingStatus!]
+
+  """Filter by type"""
+  types: [AccountHolderType!]
 }
 
 """StatusInfo when onboarding has been finalized"""
@@ -3517,7 +4180,8 @@ type OnboardingInfo {
   email: String
 
   """
-  language of the onboarding process. This consists of a 2-3 letter base language tag representing the language, optionally followed by additional subtags separated by '-'. The most common extra information is the country or region variant (like 'en-US' or 'fr-CA') or the type of alphabet to use (like 'sr-Latn'). Other variants like the type of orthography ('de-DE-1996') are usually not used in the context of this header. [Learn More](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language)
+  Language of the onboarding process.
+  - Accepted languages: `["en", "fr", "nl", "de", "it", "es", "pt", "fi"]`
   """
   language: String
 
@@ -3571,9 +4235,7 @@ type OnboardingInvalidStatusInfo implements OnboardingStatusInfo {
 """Rejection returned if an onboarding is not completed"""
 type OnboardingNotCompletedRejection implements Rejection {
   message: String!
-
-  """@deprecated(reason: "use `onboarding.id` instead")"""
-  onboardingId: String!
+  onboardingId: String! @deprecated(reason: "use `onboarding.id` instead")
   onboarding: Onboarding!
 }
 
@@ -3769,18 +4431,13 @@ type PaymentInitiated implements PaymentStatusInfo {
 
 """Payment Level of the account"""
 enum PaymentLevel {
-  """When the account is limited to 150€ within 30 days and with no IBAN"""
+  """When the account is limited to 0€ within 30 days and with no IBAN"""
   Limited
 
   """
   When the account holder is fully verified and then the account is unlimited with an IBAN
   """
   Unlimited
-}
-
-enum PaymentLinkSequenceType {
-  OneOff
-  Recurrent
 }
 
 interface PaymentMandate {
@@ -3900,6 +4557,24 @@ enum PaymentMandateScheme {
 
   """Internal Direct Debit B2B"""
   InternalDirectDebitB2b
+
+  """Card Visa"""
+  CardVisa
+
+  """Card Mastercard"""
+  CardMastercard
+
+  """Card Cartes Bancaires"""
+  CardCartesBancaires
+}
+
+"""Payment Mandate Sequence"""
+enum PaymentMandateSequence {
+  """The Payment Mandate can be used for recurrent collections"""
+  Recurrent
+
+  """The Payment Mandate can be used only once"""
+  OneOff
 }
 
 """Payment Mandate status"""
@@ -3984,6 +4659,12 @@ type PendingDigitalCard implements DigitalCard {
   - type: InApp
   """
   inAppProvisioningData(signatureData: SignatureData): InAppProvisioningData
+
+  """The project ID"""
+  projectId: ID!
+
+  """The card contract ID"""
+  cardContractId: ID!
 }
 
 """Pending Digital Card Status"""
@@ -4052,6 +4733,9 @@ type PhysicalCard {
 
   """Custom Options"""
   customOptions: PhysicalCardCustomOptions!
+
+  """every previous Physical Card information"""
+  previousPhysicalCards: [BasicPhysicalCardInfo!]!
 }
 
 """Physical Card Activated Status Information"""
@@ -4099,6 +4783,9 @@ type PhysicalCardConsentPendingStatusInfo implements PhysicalCardStatusInfo {
 type PhysicalCardCustomOptions {
   """Additional line embossed on the card."""
   additionalPrintedLine: String
+
+  """Custom Card Holder Name"""
+  customCardHolderName: String
 }
 
 """Rejection returned when the Physical Card does not exist"""
@@ -4136,6 +4823,9 @@ type PhysicalCardRenewedStatusInfo implements PhysicalCardStatusInfo {
 
   """`true` if PIN Code is available."""
   isPINReady: Boolean!
+
+  """New physical Card info"""
+  newPhysicalCard: BasicPhysicalCardInfo!
 }
 
 """Physical Card Status"""
@@ -4281,14 +4971,14 @@ type ProjectCardSettings {
   """Unique identifier of a project"""
   id: ID!
 
+  """Project name"""
+  name: String
+
   """Visual Id from the issuing card processor (Monext)"""
   issuingProcessorVisualId: String
 
   """Specific card product for companies"""
   specificCardProductCodeForCompanies: String
-
-  """Project name"""
-  name: String
 
   """Project's card settings"""
   cardSettings: [CardSettings!]!
@@ -4391,6 +5081,9 @@ type ProjectInfo {
   Flag that determines if desktop authentication is enabled for this project
   """
   allowsDesktopAuthentication: Boolean!
+
+  """The related project settings"""
+  projectSettingsId: ID!
 }
 
 type ProjectInvalidStatusRejection implements Rejection {
@@ -4448,9 +5141,6 @@ type PublicOnboardingDisabledRejection implements Rejection {
 }
 
 type Query {
-  cardInfos(input: CardInfosInput!): CardInfos
-  cardPINInfos(input: CardPINInfosInput!): CardPINInfos
-
   """Fetch company info (name, beneficiaries...) by Siren number"""
   companyInfoBySiren(input: CompanyInfoBySirenInput!): CompanyInfoBySirenPayload!
 
@@ -4459,6 +5149,11 @@ type Query {
   """
   companyUboByCompanyRefAndHeadquarterCountry(input: CompanyUboByCompanyRefAndHeadquarterCountryInput!): CompanyUboByCompanyRefAndHeadquarterCountryPayload!
   onboardingInfo(id: ID!): OnboardingInfo
+
+  """Returns a supporting document collection from its id."""
+  supportingDocumentCollection(id: ID!): SupportingDocumentCollection
+  cardInfos(input: CardInfosInput!): CardInfos
+  cardPINInfos(input: CardPINInfosInput!): CardPINInfos
   projectInfoById(id: ID!): ProjectInfo!
 
   """Return a merchant payment link by id"""
@@ -4546,6 +5241,20 @@ enum RequestMerchantProfileUpdateStatus {
 
   """A Request that has already been rejected"""
   Rejected
+
+  """A Request that has been canceled by the user"""
+  Canceled
+}
+
+input RequestSupportingDocumentCollectionReviewInput {
+  """Id of the supporting document collection to review."""
+  supportingDocumentCollectionId: ID!
+}
+
+union RequestSupportingDocumentCollectionReviewPayload = RequestSupportingDocumentCollectionReviewSuccessPayload | ForbiddenRejection | SupportingDocumentCollectionNotFoundRejection | SupportingDocumentCollectionStatusNotAllowedRejection | ValidationRejection
+
+type RequestSupportingDocumentCollectionReviewSuccessPayload {
+  supportingDocumentCollection: SupportingDocumentCollection!
 }
 
 input ResidencyAddressInput {
@@ -4579,8 +5288,13 @@ type RestrictedTo {
   """birth date"""
   birthDate: Date
 
-  """phone number"""
-  phoneNumber: String!
+  """
+  phone number
+  We're introducing more flexibility in the process to invite & bind new account members (cf [public roadmap](https://swanio.notion.site/Swan-Public-Roadmap-385e4b2e91b3409786a6c8e885654a22?p=a59db00a478e4faaaefbd901e1ed7ed3&pm=s) on notion).
+  For some use cases, it would be possible to invite an account member without their mobile phone number.
+  Please note that the phone number will remain mandatory at the invitation (despite being optional in the Graph) until the new flow is delivered. It is hidden behind a feature toggle
+  """
+  phoneNumber: String
 }
 
 """
@@ -4653,6 +5367,7 @@ type SepaDirectDebitB2BMerchantPaymentMethod implements MerchantPaymentMethod {
   When the above is false, the value of the Sepa Creditor Identifier used
   """
   sepaCreditorIdentifier: String
+  updateRequest: SepaDirectDebitPaymentMethodUpdateRequest
 }
 
 """SepaDirectDebitCoreMerchantPaymentMethod"""
@@ -4687,6 +5402,21 @@ type SepaDirectDebitCoreMerchantPaymentMethod implements MerchantPaymentMethod {
 
   """
   When the above is false, the value of the Sepa Creditor Identifier used
+  """
+  sepaCreditorIdentifier: String
+  updateRequest: SepaDirectDebitPaymentMethodUpdateRequest
+}
+
+type SepaDirectDebitPaymentMethodUpdateRequest implements MerchantPaymentMethodUpdateRequest {
+  id: ID!
+
+  """
+  If `true`, the transaction will be created with the Swan Creditor Identifier
+  """
+  useSwanSepaCreditorIdentifier: Boolean!
+
+  """
+  Your own SCI - Mandatory if the useSwanCreditorIdentifier is set to false
   """
   sepaCreditorIdentifier: String
 }
@@ -4779,6 +5509,10 @@ enum SpendingLimitType {
   Partner
 }
 
+type SuccessfulThreeDs {
+  status: ThreeDsStatus!
+}
+
 """Supporting document used for compliance"""
 type SupportingDocument {
   """Unique identifier of the document"""
@@ -4802,6 +5536,7 @@ type SupportingDocument {
 
 type SupportingDocumentAccountHolder {
   id: ID
+  name: String
 }
 
 """
@@ -4833,6 +5568,12 @@ type SupportingDocumentCollection {
   requiredSupportingDocumentPurposes: [SupportingDocumentPurpose!]!
   accountHolder: SupportingDocumentAccountHolder!
   onboarding: SupportingDocumentOnboarding!
+  projectInfo: ProjectInfo!
+
+  """SupportingDocumentCollection URL to Swan portal"""
+  supportingDocumentCollectionUrl: String!
+  type: SupportingDocumentCollectionType!
+  transaction: SupportingDocumentTransaction!
 }
 
 """Supporting document collection with Approved status"""
@@ -4874,6 +5615,17 @@ type SupportingDocumentCollectionEdge implements Edge {
 
   """The supporting document collection"""
   node: SupportingDocumentCollection!
+}
+
+"""
+Filters that can be applied when listing supporting document collections
+"""
+input SupportingDocumentCollectionFilterInput {
+  """Supporting document collection type/types we're looking for"""
+  type: [SupportingDocumentCollectionType!]
+
+  """Supporting document collection status we're looking for"""
+  status: [SupportingDocumentCollectionStatus!]
 }
 
 """Rejection returned if the supporting document collection was not found"""
@@ -4949,6 +5701,12 @@ type SupportingDocumentCollectionStatusNotAllowedRejection implements Rejection 
   message: String!
 }
 
+enum SupportingDocumentCollectionType {
+  Onboarding
+  AccountHolderVerificationRenewal
+  Transaction
+}
+
 """Supporting document collection with WaitingForUpload status"""
 type SupportingDocumentCollectionWaitingForDocumentStatusInfo implements SupportingDocumentCollectionStatusInfo {
   """When the Supporting Document Collection is created"""
@@ -4958,6 +5716,7 @@ type SupportingDocumentCollectionWaitingForDocumentStatusInfo implements Support
 enum SupportingDocumentCollectMode {
   API
   EndCustomer
+  EndCustomerCcPartner
   Partner
 }
 
@@ -4996,6 +5755,16 @@ type SupportingDocumentPurpose {
   Corresponding supporting document types accepted for this supporting document purpose
   """
   acceptableSupportingDocumentTypes: [SupportingDocumentType!]!
+
+  """
+  Corresponding Supporting Document Purpose Title translation according to accept-language header
+  """
+  label: String!
+
+  """
+  Corresponding Supporting Document Purpose Description translation according to accept-language header
+  """
+  description: String!
 }
 
 """Supporting document purpose"""
@@ -5065,6 +5834,110 @@ enum SupportingDocumentPurposeEnum {
 
   """Proof of address of the Ultimate Beneficial Owner"""
   UltimateBeneficialOwnerProofOfAddress
+
+  """Personal Income"""
+  PersonalIncome
+
+  """Personal Savings"""
+  PersonalSavings
+
+  """Investment"""
+  Investment
+
+  """Donation"""
+  Donation
+
+  """Inheritance"""
+  Inheritance
+
+  """Real Estate Income"""
+  RealEstateIncome
+
+  """Gambling Prize Winnings"""
+  GamblingPrizeWinnings
+
+  """Trade"""
+  Trade
+
+  """Company Treasury"""
+  CompanyTreasury
+
+  """Company Obligations"""
+  CompanyObligations
+
+  """Politically exposed person declaration"""
+  PepDeclaration
+
+  """Proof of the company creation process"""
+  CompanyFormationRegistration
+}
+
+"""Refused supporting document reason code"""
+enum SupportingDocumentReasonCode {
+  """The company name in document doesn’t match our records."""
+  CompanyNameMismatch
+
+  """The document must be dated less than 3 months ago."""
+  ExpiredDocument
+
+  """The address in document doesn’t match our records."""
+  InvalidAddress
+
+  """The document is not valid."""
+  InvalidDocument
+
+  """
+  The name of shareholder is not clearly visible or some fields are not duely completed.
+  """
+  InvalidOrMissingData
+
+  """Document cannot be accepted for the requested document type."""
+  UnacceptableDocument
+
+  """The document must be in color."""
+  ProviderColorIdDocumentRequired
+
+  """Documents are not signed or dated."""
+  MissingSignature
+
+  """The quality of the document is really low."""
+  BadDocumentQuality
+
+  """Full Document required."""
+  FullDocumentRequired
+
+  """
+  The document provided is missing essential details required to comprehend the transaction's nature. Please submit an additional supporting document to supplement the initial one.
+  """
+  MissingDescription
+
+  """
+  The document appears to be inconsistent with the specified transaction.
+  """
+  InvalidTransaction
+
+  """
+  The issuer or beneficiary name on the document we received does not match the information requested for the transaction.
+  """
+  TransactionNameMismatch
+
+  """
+  The date on the document we received does not match the information requested for the transaction.
+  """
+  TransactionDateMismatch
+
+  """
+  The amount on the document we received does not match the information requested for the transaction.
+  """
+  TransactionAmountMismatch
+
+  """
+  The beneficiary IBAN on the document we received does not match the information requested for the transaction.
+  """
+  IbanMismatch
+
+  """Other"""
+  Other
 }
 
 """Supporting document with Refused status"""
@@ -5072,14 +5945,14 @@ type SupportingDocumentRefusedStatusInfo implements SupportingDocumentStatusInfo
   """When the document has been refused by Swan"""
   status: SupportingDocumentStatus!
 
-  """An unique URL and one-time URL to download the Document"""
-  downloadUrl: String!
-
   """Date on which the supporting document collection has been refused"""
   refusedAt: DateTime!
 
   """Reason why the supporting document has been refused"""
   reason: String!
+
+  """Reason code why the supporting document has been refused"""
+  reasonCode: SupportingDocumentReasonCode!
 
   """Original file name"""
   filename: String!
@@ -5137,6 +6010,10 @@ type SupportingDocumentStatusNotAllowedRejection implements Rejection {
   oldStatus: SupportingDocumentStatus!
   newStatus: SupportingDocumentStatus!
   message: String!
+}
+
+type SupportingDocumentTransaction {
+  id: ID
 }
 
 """Specific type for document"""
@@ -5250,15 +6127,21 @@ enum SupportingDocumentType {
 
   """Financial Statements"""
   FinancialStatements
+
+  """Winnings Certificate"""
+  WinningsCertificate
+
+  """Invoice"""
+  Invoice
+
+  """Politically exposed person declaration"""
+  PepDeclaration
 }
 
 """Supporting document with Uploaded status"""
 type SupportingDocumentUploadedStatusInfo implements SupportingDocumentStatusInfo {
   """When the document has been uploaded but not verified by Swan yet"""
   status: SupportingDocumentStatus!
-
-  """An unique URL and one-time URL to download the Document"""
-  downloadUrl: String!
 
   """Original file name"""
   filename: String!
@@ -5282,14 +6165,14 @@ type SupportingDocumentValidatedStatusInfo implements SupportingDocumentStatusIn
   """When the document has been uploaded and verified by Swan"""
   status: SupportingDocumentStatus!
 
-  """An unique URL and one-time URL to download the Document"""
-  downloadUrl: String!
-
   """Date on which the supporting document has been validated"""
   validatedAt: DateTime!
 
   """Original file name"""
   filename: String!
+
+  """Reason why the supporting document has been validated"""
+  reason: String!
 }
 
 """Supporting document with WaitingForUpload status"""
@@ -5340,6 +6223,24 @@ type SuspendedMerchantProfileStatusInfo implements MerchantProfileStatusInfo {
   suspendedAt: Date!
 }
 
+"""The details of the 3DS challenge associated to the payment."""
+type ThreeDS {
+  """`true` if a 3DS challenge has been requested from the card holder"""
+  requested: Boolean!
+
+  """The status of the 3DS challenge"""
+  statusInfo: ThreeDsStatusInfo!
+}
+
+enum ThreeDsStatus {
+  Successful
+  Failed
+}
+
+interface ThreeDsStatusInfo {
+  status: ThreeDsStatus!
+}
+
 """Individual ultimate beneficial owner title (Mr/Ms)"""
 enum TitleEnum {
   """Identified as a man"""
@@ -5369,6 +6270,45 @@ enum TypeOfRepresentation {
   PowerOfAttorney
 }
 
+type UBOIdentityDocumentDetails {
+  """Type of identity document"""
+  type: UBOIdentityDocumentType
+
+  """Issue date of the identity document"""
+  issueDate: String
+
+  """Expiry date of the identity document"""
+  expiryDate: String
+
+  """Number of the identity document"""
+  number: String
+
+  """Issuing authority of the identity document"""
+  issuingAuthority: String
+}
+
+input UBOIdentityDocumentDetailsInput {
+  """Type of identity document"""
+  type: UBOIdentityDocumentType
+
+  """Issue date of the identity document"""
+  issueDate: String
+
+  """Expiry date of the identity document"""
+  expiryDate: String
+
+  """Number of the identity document"""
+  number: String
+
+  """Issuing authority of the identity document"""
+  issuingAuthority: String
+}
+
+enum UBOIdentityDocumentType {
+  Passport
+  IdCard
+}
+
 """Ultimate beneficial Direct Owner company info."""
 type UltimateBeneficialDirectOwnerCompanyInfo implements UltimateBeneficialOwnerInfo {
   """Ultimate Beneficial Owner Unique Identifier ."""
@@ -5385,7 +6325,10 @@ type UltimateBeneficialDirectOwnerCompanyInfo implements UltimateBeneficialOwner
   """Name of the company."""
   name: String!
 
-  """Registration number."""
+  """
+  Registration number of the company (for example, Système d'Identification du Répertoire des ENtreprises [SIREN] in France, ...).
+  - Length must be from 0 to 50 characters.
+  """
   registrationNumber: String!
 }
 
@@ -5431,7 +6374,10 @@ type UltimateBeneficialIndirectOwnerCompanyInfo implements UltimateBeneficialOwn
   """Name of the company."""
   name: String!
 
-  """Registration number."""
+  """
+  Registration number of the company (for example, Système d'Identification du Répertoire des ENtreprises [SIREN] in France, ...).
+  - Length must be from 0 to 50 characters.
+  """
   registrationNumber: String!
 }
 
@@ -5492,6 +6438,22 @@ enum UltimateBeneficialOwnerType {
   IndirectCompany
 }
 
+input UnauthenticatedInitiateMerchantCardPaymentFromPaymentLinkInput {
+  """Payment Mandate ID generated by Swan"""
+  cardPaymentMandateId: ID!
+
+  """Payment Link related to the Card Payment Mandate"""
+  paymentLinkId: ID!
+}
+
+union UnauthenticatedInitiateMerchantCardPaymentFromPaymentLinkPayload = UnauthenticatedInitiateMerchantCardPaymentFromPaymentLinkSuccessPayload | ForbiddenRejection | NotFoundRejection | InternalErrorRejection | ValidationRejection | MerchantCardPaymentDeclinedRejection
+
+type UnauthenticatedInitiateMerchantCardPaymentFromPaymentLinkSuccessPayload {
+  """"""
+  paymentId: ID!
+  redirectUrl: URL!
+}
+
 input UnauthenticatedInitiateMerchantSddPaymentCollectionFromPaymentLinkInput {
   """Payment Mandate ID generated by Swan"""
   mandateId: ID!
@@ -5511,8 +6473,16 @@ type UnauthenticatedInitiateMerchantSddPaymentCollectionFromPaymentLinkSuccessPa
 }
 
 input UnauthenticatedOnboardPublicCompanyAccountHolderInput {
+  """ID of the project."""
   projectId: ID!
+
+  """
+  Verification Flow.
+  - Default value to 'Upfront' if not provided.
+  """
   verificationFlow: VerificationFlow! = Upfront
+
+  """Country of the account created at the end of onboarding."""
   accountCountry: AccountCountry
 }
 
@@ -5523,8 +6493,16 @@ type UnauthenticatedOnboardPublicCompanyAccountHolderSuccessPayload {
 }
 
 input UnauthenticatedOnboardPublicIndividualAccountHolderInput {
+  """ID of the project."""
   projectId: ID!
+
+  """
+  Verification Flow.
+  - Default value to 'Upfront' if not provided.
+  """
   verificationFlow: VerificationFlow! = Upfront
+
+  """Country of the account created at the end of onboarding."""
   accountCountry: AccountCountry
 }
 
@@ -5535,23 +6513,128 @@ type UnauthenticatedOnboardPublicIndividualAccountHolderSuccessPayload {
 }
 
 input UnauthenticatedUpdateCompanyOnboardingInput {
+  """
+  Account name of the company account holder.
+  - Length must be from 0 to 100 characters.
+  """
   accountName: String
+
+  """Business activity."""
   businessActivity: BusinessActivity
+
+  """
+  Description of the business activity.
+  - Length must be from 0 to 1024 characters.
+  """
   businessActivityDescription: String
+
+  """Country of the account created at the end of onboarding."""
   accountCountry: AccountCountry
+
+  """Type of the company (Association ...)."""
   companyType: CompanyType
+
+  """
+  Email of the legal representative.
+  - Length must be from 0 to 255 characters.
+  - Valid format (regex):
+    ```
+    /^[A-Z0-9_+.-]*[A-Z0-9_+-]@([A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,}$/i
+    ```
+  - Some email providers are not accepted by our system.
+  """
   email: String
+
+  """
+  The ultimate beneficial owner is defined as the natural person (s) who own or control, directly and/or indirectly, the reporting company.
+  
+  The ultimate beneficial owner is :
+  - either the natural person (s) who hold, directly or indirectly, more than 25% of the capital or the rights of vote of the reporting company;
+  - either the natural person (s) who exercise, by other means, a power of control of the company;
+  """
   individualUltimateBeneficialOwners: [IndividualUltimateBeneficialOwnerInput!]
+
+  """
+  Is the company registered with their country's national register (for example, Registre du Commerce et des Sociétés [RCS] in France).
+  """
   isRegistered: Boolean
+
+  """
+  Language of the onboarding process.
+  - Accepted languages: `["en", "fr", "nl", "de", "it", "es", "pt", "fi"]`
+  """
   language: String
+
+  """Estimated monthly payment volume (euro)."""
   monthlyPaymentVolume: MonthlyPaymentVolume
+
+  """
+  Company name.
+  - Length must be from 0 to 100 characters.
+  - Valid format (regex):
+    ```
+    /^(?:(?<!http(s)*:\/\/|www\.|&lt;|&gt;)[!-.\/-;A-Z[-`a-zÀ-ÖÙ-öº-ƿǄ-ʯʹ-ʽΈ-ΊΎ-ΡΣ-ҁҊ-Ֆա-ևႠ-Ⴥა-ჺᄀ-፜፩-ᎏᵫ-ᶚḀ-῾ⴀ-ⴥ⺀-⿕ぁ-ゖゝ-ㇿ㋿-鿯鿿-ꒌꙀ-ꙮꚀ-ꚙꜦ-ꞇꞍ-ꞿꥠ-ꥼＡ-Ｚａ-ｚ/]|¿|¡| |'|-|Ά|Ό|=|\?|@|\[|]|\||‘|’)*$/
+    ```
+  """
   name: String
+
+  """ID of the onboarding to update."""
   onboardingId: ID!
+
+  """
+  Registration number of the company (for example, Système d'Identification du Répertoire des ENtreprises [SIREN] in France, ...).
+  - Length must be from 0 to 50 characters.
+  """
   registrationNumber: String
+
+  """
+  Residency address of the head office.
+  - Must be in a European country.
+  """
   residencyAddress: ResidencyAddressInput
+
+  """
+  VAT number of the company.
+  - (AT)?U[0-9]{8} |                              # Austria
+  - (BE)?0[0-9]{9} |                              # Belgium
+  - (BG)?[0-9]{9,10} |                            # Bulgaria
+  - (CY)?[0-9]{8}L |                              # Cyprus
+  - (CZ)?[0-9]{8,10} |                            # Czech Republic
+  - (DE)?[0-9]{9} |                               # Germany
+  - (DK)?[0-9]{8} |                               # Denmark
+  - (EE)?[0-9]{9} |                               # Estonia
+  - (EL|GR)?[0-9]{9} |                            # Greece
+  - (ES)?[0-9A-Z][0-9]{7}[0-9A-Z] |               # Spain
+  - (FI)?[0-9]{8} |                               # Finland
+  - (FR)?[0-9A-Z]{2}[0-9]{9} |                    # France
+  - (GB)?([0-9]{9}([0-9]{3})?|[A-Z]{2}[0-9]{3}) | # United Kingdom
+  - (HU)?[0-9]{8} |                               # Hungary
+  - (IE)?[0-9]S[0-9]{5}L |                        # Ireland
+  - (IT)?[0-9]{11} |                              # Italy
+  - (LT)?([0-9]{9}|[0-9]{12}) |                   # Lithuania
+  - (LU)?[0-9]{8} |                               # Luxembourg
+  - (LV)?[0-9]{11} |                              # Latvia
+  - (MT)?[0-9]{8} |                               # Malta
+  - (NL)?[0-9]{9}B[0-9]{2} |                      # Netherlands
+  - (PL)?[0-9]{10} |                              # Poland
+  - (PT)?[0-9]{9} |                               # Portugal
+  - (RO)?[0-9]{2,10} |                            # Romania
+  - (SE)?[0-9]{12} |                              # Sweden
+  - (SI)?[0-9]{8} |                               # Slovenia
+  - (SK)?[0-9]{10}                                # Slovakia
+  """
   vatNumber: String
+
+  """
+    Tax Identification Number.
+  - Must be from 0 to 16 characters.
+  """
   taxIdentificationNumber: String
+
+  """Type of representation (legal representative or power of attorney)."""
   typeOfRepresentation: TypeOfRepresentation
+
+  """Legal representative personal address."""
   legalRepresentativePersonalAddress: AddressInformationInput
 }
 
@@ -5562,14 +6645,51 @@ type UnauthenticatedUpdateCompanyOnboardingSuccessPayload {
 }
 
 input UnauthenticatedUpdateIndividualOnboardingInput {
+  """
+  Account name of the individual account holder.
+  - Length must be from 0 to 100 characters.
+  """
   accountName: String
+
+  """Country of the account created at the end of onboarding."""
   accountCountry: AccountCountry
+
+  """
+  Email of the legal representative.
+  - Length must be from 0 to 255 characters.
+  - Valid format (regex):
+    ```
+    /^[A-Z0-9_+.-]*[A-Z0-9_+-]@([A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,}$/i
+    ```
+  - Some email providers are not accepted by our system.
+  """
   email: String
+
+  """Employment status of the individual account holder."""
   employmentStatus: EmploymentStatus
+
+  """
+  Language of the onboarding process.
+  - Accepted languages: `["en", "fr", "nl", "de", "it", "es", "pt", "fi"]`
+  """
   language: String
+
+  """Monthly income of the individual account holder (euro)."""
   monthlyIncome: MonthlyIncome
+
+  """ID of the onboarding to update."""
   onboardingId: ID!
+
+  """
+  Residency address of the individual account holder.
+  - Must be in a European country.
+  """
   residencyAddress: ResidencyAddressInput
+
+  """
+    Tax Identification Number.
+  - Must be from 0 to 16 characters.
+  """
   taxIdentificationNumber: String
 }
 
@@ -5577,6 +6697,11 @@ union UnauthenticatedUpdateIndividualOnboardingPayload = ForbiddenRejection | In
 
 type UnauthenticatedUpdateIndividualOnboardingSuccessPayload {
   onboarding: OnboardingInfo!
+}
+
+type UpdateRequestNotPendingReviewRejection implements Rejection {
+  requestUpdateId: ID
+  message: String!
 }
 
 scalar Upload
@@ -5593,8 +6718,28 @@ type User {
   """unique identifier of the user"""
   id: ID!
 
-  """The list of account memberships"""
-  accountMemberships(first: Int! = 50, before: String, after: String, filters: AccountMembershipsFilterInput): AccountMembershipConnection!
+  """
+  The list of account memberships
+  
+  Implements the Relay Connection interface, used to paginate list of element ([Learn More](https://docs.swan.io/api/pagination))
+  """
+  accountMemberships(
+    """the number of elements to load (maximum: 100)"""
+    first: Int! = 50
+
+    """
+    the index (a unique reference in string form) from which you will load the preceding elements
+    """
+    before: String
+
+    """
+    the index (a unique reference in string form) from which you will load the following elements
+    """
+    after: String
+
+    """a filtering table you can apply to your list of connections"""
+    filters: AccountMembershipsFilterInput
+  ): AccountMembershipConnection!
 
   """
   mobile phone number with the international format (Example: +33689788967)
@@ -5607,8 +6752,16 @@ type User {
   """last name"""
   lastName: String
 
+  """Birth last name"""
+  birthLastName: String
+
   """list of first names"""
   allFirstNames: [String!]
+
+  """
+  full name : concatenation of firstName + [ birthLastName | lastName ] depending on preferredLastName setting
+  """
+  fullName: String
 
   """birth date"""
   birthDate: Date
@@ -5616,20 +6769,17 @@ type User {
   """nationality"""
   nationalityCCA3: CCA3
 
-  """`true` if Swan has verified the user's identity"""
-  idVerified: Boolean!
+  """birth city"""
+  birthCity: String
+
+  """
+  `true` if Swan has verified the user's identity
+  @deprecated Use the equivalent identificationLevels.expert field instead
+  """
+  idVerified: Boolean! @deprecated(reason: "Use the equivalent `identificationLevels.expert` field instead")
 
   """the methods used to authenticate this user"""
   authenticators: [Authenticator!]
-
-  """
-  Identification status
-  
-  Each attempt to go through our identity verification process will update this value.
-  
-  This field is only available for the current user.
-  """
-  identificationStatus: IdentificationStatus
 
   """
   List of identification levels available for the user.
@@ -5645,11 +6795,17 @@ type User {
   """
   preferredNotificationChannel: PreferredNotificationChannel
 
+  """Status of the user"""
+  status: UserStatus
+
   """Creation date of the user"""
   createdAt: DateTime!
 
   """Last update date of the user"""
   updatedAt: DateTime!
+
+  """The last name that the user prefers to use"""
+  preferredLastName: String
 }
 
 """
@@ -5673,7 +6829,7 @@ type UserEdge implements Edge {
   """
   cursor: String!
 
-  """The consent"""
+  """The user"""
   node: User!
 }
 
@@ -5697,6 +6853,21 @@ type UserNotAllowedToSuspendItsOwnAccountMembershipRejection implements Rejectio
 """Rejection returned when the User is not the Card Holder"""
 type UserNotCardHolderRejection implements Rejection {
   message: String!
+}
+
+enum UserStatus {
+  """Users with Active status are able to login & use Swan."""
+  Active
+
+  """
+  Users in Deactivated status don't use Swan anymore and won't ever be able to login. Their phone number can be reused as a new number.
+  """
+  Deactivated
+
+  """
+  Users in Blocked status are not able to login for security reason. Their phone number can't be reused.
+  """
+  Blocked
 }
 
 """A detail of a validation error : what field is errored and why"""
@@ -5741,6 +6912,51 @@ enum VerificationFlow {
   When you ask the account holder the minimum required to comply the law at the beginning of the relationship.
   """
   Progressive
+}
+
+type VerificationRenewal {
+  verificationRenewalId: ID
+}
+
+"""
+Account Holder Verification Requirement
+
+It is a sub status for the Account Holder when his verification status is WaitingForInformation
+"""
+type VerificationRequirement {
+  id: ID!
+  type: VerificationRequirementType!
+}
+
+type VerificationRequirementsNotUpdatableRejection implements Rejection {
+  accountHolderId: String!
+  accountHolderVerificationStatus: VerificationStatus!
+  message: String!
+}
+
+enum VerificationRequirementType {
+  """Swan is requesting for a 1st transfer"""
+  FirstTransferRequired
+
+  """Swan is requesting some Supporting Documents"""
+  SupportingDocumentsRequired
+
+  """Swan is requesting some clarification on the UBO"""
+  UboDetailsRequired
+
+  """
+  Swan is requesting some clarification on the legal representative or on the account member with legal representative permissions
+  """
+  LegalRepresentativeDetailsRequired
+
+  """Swan is requesting some clarification on the organization"""
+  OrganizationDetailsRequired
+
+  """Swan is requesting some tax identifier"""
+  TaxIdRequired
+
+  """Swan is requesting more information on the account holders"""
+  Other
 }
 
 """Verification status of an account holder"""
@@ -5832,4 +7048,13 @@ type WebBankingSettings {
   canOrderPhysicalCards: Boolean
   canViewMembers: Boolean
   canAddNewMembers: Boolean
+  canCreateMerchantProfile: Boolean
+  canRequestOnlineCardsPaymentMethod: Boolean
+  canRequestSepaDirectDebitCorePaymentMethod: Boolean
+  canRequestSepaDirectDebitB2BPaymentMethod: Boolean
+  canRequestInternalDirectDebitCorePaymentMethod: Boolean
+  canRequestInternalDirectDebitB2BPaymentMethod: Boolean
+  canRequestChecksPaymentMethod: Boolean
+  canInitiateCheckMerchantPayments: Boolean
+  canCreateMerchantPaymentLinks: Boolean
 }

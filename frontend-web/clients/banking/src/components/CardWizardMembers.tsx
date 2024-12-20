@@ -1,3 +1,4 @@
+import { useForwardPagination } from "@swan-io/graphql-client";
 import { Avatar } from "@swan-io/lake/src/components/Avatar";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Fill } from "@swan-io/lake/src/components/Fill";
@@ -6,6 +7,7 @@ import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { Pressable } from "@swan-io/lake/src/components/Pressable";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
+import { ScrollView } from "@swan-io/lake/src/components/ScrollView";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tag } from "@swan-io/lake/src/components/Tag";
 import { Tile } from "@swan-io/lake/src/components/Tile";
@@ -15,7 +17,6 @@ import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from 
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
-  ScrollView,
   StyleProp,
   StyleSheet,
   View,
@@ -95,7 +96,9 @@ export const CardWizardMembers = forwardRef<CardWizardMembersRef, Props>(
       [currentMembers],
     );
 
-    const memberships = account?.memberships;
+    const connection = account?.memberships;
+
+    const memberships = useForwardPagination(connection);
 
     const onScroll = useCallback(
       (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -139,16 +142,11 @@ export const CardWizardMembers = forwardRef<CardWizardMembersRef, Props>(
               {memberships.edges.map(({ node }) => {
                 const isSelected = selectedIds.has(node.id);
 
-                const initials =
-                  node.user?.firstName != null && node.user?.lastName != null
-                    ? `${node.user.firstName.charAt(0)}${node.user.lastName.charAt(0)}`
-                    : undefined;
-
                 const contents = (
                   <View style={styles.lineContainer}>
                     <LakeCheckbox value={isSelected} />
                     <Space width={16} />
-                    <Avatar size={large ? 32 : 24} initials={initials} />
+                    <Avatar size={large ? 32 : 24} user={node.user} />
                     <Space width={16} />
 
                     <View style={styles.names}>

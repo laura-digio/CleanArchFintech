@@ -1,4 +1,5 @@
 import { AsyncData, Result } from "@swan-io/boxed";
+import { useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Icon } from "@swan-io/lake/src/components/Icon";
 import { LakeAlert } from "@swan-io/lake/src/components/LakeAlert";
@@ -8,23 +9,22 @@ import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { LakeTooltip } from "@swan-io/lake/src/components/LakeTooltip";
 import { Link } from "@swan-io/lake/src/components/Link";
+import { ScrollView } from "@swan-io/lake/src/components/ScrollView";
 import { Separator } from "@swan-io/lake/src/components/Separator";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
 import { TilePlaceholder } from "@swan-io/lake/src/components/TilePlaceholder";
 import { colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
 import { isNotNullishOrEmpty, isNullishOrEmpty } from "@swan-io/lake/src/utils/nullish";
 import { getCountryName, isCountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
+import { printIbanFormat } from "@swan-io/shared-business/src/utils/validation";
 import { useMemo } from "react";
-import { ScrollView, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { P, match } from "ts-pattern";
 import { ErrorView } from "../components/ErrorView";
 import { LakeCopyTextLine } from "../components/LakeCopyTextLine";
 import { AccountDetailsIbanPageDocument } from "../graphql/partner";
 import { formatNestedMessage, t } from "../utils/i18n";
-import { printIbanFormat } from "../utils/iban";
-import { isUnauthorizedError } from "../utils/urql";
 import { NotFoundPage } from "./NotFoundPage";
 
 const styles = StyleSheet.create({
@@ -61,23 +61,11 @@ const IBANCopyLine = ({ IBAN }: { IBAN: string }) => (
 
 type Props = {
   accountId: string;
-  accountMembershipId: string;
-  idVerified: boolean;
   largeBreakpoint: boolean;
-  userStatusIsProcessing: boolean;
 };
 
-export const AccountDetailsIbanPage = ({
-  // accountMembershipId,
-  // idVerified,
-  // userStatusIsProcessing,
-  accountId,
-  largeBreakpoint,
-}: Props) => {
-  const { data } = useUrqlQuery(
-    { query: AccountDetailsIbanPageDocument, variables: { accountId } },
-    [],
-  );
+export const AccountDetailsIbanPage = ({ accountId, largeBreakpoint }: Props) => {
+  const [data] = useQuery(AccountDetailsIbanPageDocument, { accountId });
 
   return (
     <ScrollView contentContainerStyle={[styles.content, largeBreakpoint && styles.contentDesktop]}>
@@ -89,9 +77,7 @@ export const AccountDetailsIbanPage = ({
             <TilePlaceholder />
           </>
         ))
-        .with(AsyncData.P.Done(Result.P.Error(P.select())), error =>
-          isUnauthorizedError(error) ? <></> : <ErrorView error={error} />,
-        )
+        .with(AsyncData.P.Done(Result.P.Error(P.select())), error => <ErrorView error={error} />)
         .with(AsyncData.P.Done(Result.P.Ok(P.select())), ({ account }) => {
           if (!account) {
             return <NotFoundPage />;
@@ -124,13 +110,6 @@ export const AccountDetailsIbanPage = ({
               </LakeHeading>
 
               <Space height={12} />
-
-              {accountClosed && (
-                <>
-                  <LakeAlert variant="warning" title={t("accountDetails.alert.accountClosed")} />
-                  <Space height={20} />
-                </>
-              )}
 
               <Tile
                 paddingVertical={24}
@@ -183,7 +162,7 @@ export const AccountDetailsIbanPage = ({
                         actions={
                           <LakeTooltip
                             content={t("accountDetails.iban.ibanUnavailableTooltip")}
-                            placement="top"
+                            placement="right"
                             togglableOnFocus={true}
                             hideArrow={true}
                           >
@@ -206,7 +185,7 @@ export const AccountDetailsIbanPage = ({
                     actions={
                       <LakeTooltip
                         content={t("accountDetails.iban.bicUnavailableTooltip")}
-                        placement="top"
+                        placement="right"
                         togglableOnFocus={true}
                         hideArrow={true}
                       >

@@ -1,99 +1,157 @@
-import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
+import { useMutation } from "@swan-io/graphql-client";
 import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
-import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
-import { Separator } from "@swan-io/lake/src/components/Separator";
 import { Space } from "@swan-io/lake/src/components/Space";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
-import { breakpoints, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { TabView } from "@swan-io/lake/src/components/TabView";
+import { identity } from "@swan-io/lake/src/utils/function";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
+import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
 import { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { match } from "ts-pattern";
-import { InitiateSepaCreditTransfersDocument } from "../graphql/partner";
+import { P, match } from "ts-pattern";
+import { AccountCountry, InitiateSepaCreditTransfersDocument } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { encodeDateTime } from "../utils/date";
 import { t } from "../utils/i18n";
 import { Router } from "../utils/routes";
+import {
+  BeneficiarySepaWizardForm,
+  SepaBeneficiary,
+  TransferWizardBeneficiarySummary,
+} from "./BeneficiarySepaWizardForm";
+import { SavedBeneficiariesForm } from "./SavedBeneficiariesForm";
 import {
   Details,
   TransferRegularWizardDetails,
   TransferRegularWizardDetailsSummary,
 } from "./TransferRegularWizardDetails";
 import { Schedule, TransferRegularWizardSchedule } from "./TransferRegularWizardSchedule";
-import {
-  Beneficiary,
-  TransferWizardBeneficiary,
-  TransferWizardBeneficiarySummary,
-} from "./TransferWizardBeneficiary";
 
-const styles = StyleSheet.create({
-  root: {
-    ...commonStyles.fill,
-  },
-  container: {
-    ...commonStyles.fill,
-  },
-  header: {
-    paddingVertical: spacings[12],
-  },
-  headerContents: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    maxWidth: 1336,
-    marginHorizontal: "auto",
-    paddingHorizontal: spacings[96],
-  },
-  headerTitle: {
-    ...commonStyles.fill,
-  },
-  mobileZonePadding: {
-    paddingHorizontal: spacings[24],
-    flexGrow: 1,
-  },
-  contents: {
-    flexShrink: 1,
-    flexGrow: 1,
-    marginHorizontal: "auto",
-    maxWidth: 1172,
-    paddingHorizontal: spacings[24],
-    paddingVertical: spacings[24],
-    width: "100%",
-  },
-  desktopContents: {
-    marginVertical: "auto",
-    paddingHorizontal: spacings[96],
-    paddingVertical: spacings[24],
-  },
-});
-
-type Step =
-  | { name: "Beneficiary"; beneficiary?: Beneficiary }
-  | {
-      name: "Details";
-      beneficiary: Beneficiary;
-      details?: Details;
-    }
-  | { name: "Schedule"; beneficiary: Beneficiary; details: Details };
-
-type Props = {
-  onPressClose?: () => void;
+const BeneficiaryStep = ({
+  accountCountry,
+  accountId,
+  initialBeneficiary,
+  isAccountClosing,
+  onPressSubmit,
+}: {
+  accountCountry: AccountCountry;
   accountId: string;
-  accountMembershipId: string;
+  initialBeneficiary: SepaBeneficiary | undefined;
+  isAccountClosing: boolean;
+  onPressSubmit: (beneficiary: SepaBeneficiary) => void;
+}) => {
+  const { canInitiateCreditTransferToNewBeneficiary, canCreateTrustedBeneficiary } =
+    usePermissions();
+
+  const [activeTab, setActiveTab] = useState(
+    canInitiateCreditTransferToNewBeneficiary || isAccountClosing
+      ? (initialBeneficiary?.kind ?? "new")
+      : "saved",
+  );
+
+  const tabs: { id: SepaBeneficiary["kind"]; label: string }[] = [
+    ...(canInitiateCreditTransferToNewBeneficiary || isAccountClosing
+      ? [{ id: "new" as const, label: t("transfer.new.beneficiary.new") }]
+      : []),
+    { id: "saved" as const, label: t("transfer.new.beneficiary.saved") },
+  ];
+
+  return (
+    <>
+      <LakeHeading level={2} variant="h3">
+        {t("transfer.new.beneficiary.title")}
+      </LakeHeading>
+
+      {tabs.length > 1 && (
+        <>
+          <Space height={24} />
+
+          <TabView
+            activeTabId={activeTab}
+            tabs={tabs}
+            onChange={tab => setActiveTab(tab as SepaBeneficiary["kind"])}
+            otherLabel={t("common.tabs.other")}
+          />
+        </>
+      )}
+
+      <Space height={32} />
+
+      {match(activeTab)
+        .with("new", () => (
+          <BeneficiarySepaWizardForm
+            mode="continue"
+            accountCountry={accountCountry}
+            accountId={accountId}
+            onPressSubmit={onPressSubmit}
+            saveCheckboxVisible={canCreateTrustedBeneficiary && !isAccountClosing}
+            initialBeneficiary={match(initialBeneficiary)
+              .with({ kind: "new" }, identity)
+              .with({ kind: "saved" }, P.nullish, () => undefined)
+              .exhaustive()}
+          />
+        ))
+        .with("saved", () => (
+          <SavedBeneficiariesForm type="Sepa" accountId={accountId} onPressSubmit={onPressSubmit} />
+        ))
+        .exhaustive()}
+    </>
+  );
 };
 
-export const TransferRegularWizard = ({ onPressClose, accountId, accountMembershipId }: Props) => {
-  const [transfer, initiateTransfers] = useUrqlMutation(InitiateSepaCreditTransfersDocument);
-  const [step, setStep] = useState<Step>({ name: "Beneficiary" });
+type Step =
+  | {
+      name: "Beneficiary";
+      beneficiary?: SepaBeneficiary;
+    }
+  | {
+      name: "Details";
+      beneficiary: SepaBeneficiary;
+      details?: Details;
+    }
+  | {
+      name: "Schedule";
+      beneficiary: SepaBeneficiary;
+      details: Details;
+    };
+
+type Props = {
+  large: boolean;
+  isAccountClosing?: boolean;
+  onPressClose?: () => void;
+  accountCountry: AccountCountry;
+  accountId: string;
+  accountMembershipId: string;
+  // Enforce prefill with saved beneficiary data only
+  initialBeneficiary?: Extract<SepaBeneficiary, { kind: "saved" }>;
+};
+
+export const TransferRegularWizard = ({
+  large,
+  isAccountClosing = false,
+  onPressClose,
+  accountCountry,
+  accountId,
+  accountMembershipId,
+  initialBeneficiary,
+}: Props) => {
+  const hasInitialBeneficiary = isNotNullish(initialBeneficiary);
+  const [initiateTransfers, transfer] = useMutation(InitiateSepaCreditTransfersDocument);
+
+  const [step, setStep] = useState<Step>(() =>
+    hasInitialBeneficiary
+      ? { name: "Details", beneficiary: initialBeneficiary }
+      : { name: "Beneficiary" },
+  );
+
+  const { canReadTransaction } = usePermissions();
 
   const initiateTransfer = ({
     beneficiary,
     details,
     schedule,
   }: {
-    beneficiary: Beneficiary;
+    beneficiary: SepaBeneficiary;
     details: Details;
     schedule: Schedule;
   }) => {
@@ -101,12 +159,22 @@ export const TransferRegularWizard = ({ onPressClose, accountId, accountMembersh
       input: {
         accountId,
         consentRedirectUrl:
-          window.location.origin + Router.AccountTransactionsListRoot({ accountMembershipId }),
+          window.location.origin +
+          match({ isAccountClosing, canReadTransaction })
+            .with({ isAccountClosing: true }, () => Router.AccountClose({ accountId }))
+            .with({ canReadTransaction: true }, () =>
+              Router.AccountTransactionsListRoot({ accountMembershipId, kind: "transfer" }),
+            )
+            .with({ canReadTransaction: false }, () =>
+              Router.AccountPaymentsRoot({ accountMembershipId, kind: "transfer" }),
+            )
+            .exhaustive(),
         creditTransfers: [
           {
             amount: details.amount,
             label: details.label,
             reference: details.reference,
+
             ...match(schedule)
               .with({ isScheduled: true }, ({ scheduledDate, scheduledTime }) => ({
                 requestedExecutionAt: encodeDateTime(scheduledDate, `${scheduledTime}:00`),
@@ -114,12 +182,20 @@ export const TransferRegularWizard = ({ onPressClose, accountId, accountMembersh
               .otherwise(({ isInstant }) => ({
                 mode: isInstant ? "InstantWithFallback" : "Regular",
               })),
-            sepaBeneficiary: {
-              name: beneficiary.name,
-              save: false,
-              iban: beneficiary.iban,
-              isMyOwnIban: false, // TODO
-            },
+
+            ...match(beneficiary)
+              .with({ kind: "new" }, () => ({
+                sepaBeneficiary: {
+                  name: beneficiary.name,
+                  save: beneficiary.kind === "new" && beneficiary.save,
+                  iban: beneficiary.iban,
+                  isMyOwnIban: false, // TODO
+                },
+              }))
+              .with({ kind: "saved" }, ({ id }) => ({
+                trustedBeneficiaryId: id,
+              }))
+              .exhaustive(),
           },
         ],
       },
@@ -153,123 +229,104 @@ export const TransferRegularWizard = ({ onPressClose, accountId, accountMembersh
           .exhaustive();
       })
       .tapError(error => {
-        showToast({ variant: "error", title: translateError(error) });
+        showToast({ variant: "error", error, title: translateError(error) });
       });
   };
 
   return (
-    <ResponsiveContainer style={styles.root} breakpoint={breakpoints.medium}>
-      {({ large }) => (
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <View style={[styles.headerContents, !large && styles.mobileZonePadding]}>
-              {onPressClose != null && (
-                <>
-                  <LakeButton
-                    mode="tertiary"
-                    icon="dismiss-regular"
-                    onPress={onPressClose}
-                    ariaLabel={t("common.closeButton")}
-                  />
+    <>
+      {match(step)
+        .with({ name: "Beneficiary" }, ({ beneficiary }) => (
+          <BeneficiaryStep
+            accountCountry={accountCountry}
+            accountId={accountId}
+            initialBeneficiary={beneficiary}
+            isAccountClosing={isAccountClosing}
+            onPressSubmit={beneficiary => {
+              setStep({ name: "Details", beneficiary });
+            }}
+          />
+        ))
+        .with({ name: "Details" }, ({ beneficiary, details }) => (
+          <>
+            <TransferWizardBeneficiarySummary
+              isMobile={!large}
+              beneficiary={beneficiary}
+              onPressEdit={
+                hasInitialBeneficiary
+                  ? undefined
+                  : () => setStep({ name: "Beneficiary", beneficiary })
+              }
+            />
 
-                  <Space width={large ? 32 : 8} />
-                </>
-              )}
+            <Space height={32} />
 
-              <View style={styles.headerTitle}>
-                <LakeHeading level={2} variant="h3">
-                  {t("transfer.newTransfer")}
-                </LakeHeading>
-              </View>
-            </View>
-          </View>
+            <LakeHeading level={2} variant="h3">
+              {t("transfer.new.details.title")}
+            </LakeHeading>
 
-          <Separator />
+            <Space height={32} />
 
-          <ScrollView contentContainerStyle={[styles.contents, large && styles.desktopContents]}>
-            {match(step)
-              .with({ name: "Beneficiary" }, ({ beneficiary }) => {
-                return (
-                  <>
-                    <LakeHeading level={2} variant="h3">
-                      {t("transfer.new.benefiary.title")}
-                    </LakeHeading>
+            <TransferRegularWizardDetails
+              accountMembershipId={accountMembershipId}
+              isAccountClosing={isAccountClosing}
+              initialDetails={details}
+              onPressPrevious={() => {
+                hasInitialBeneficiary
+                  ? onPressClose?.()
+                  : setStep({ name: "Beneficiary", beneficiary });
+              }}
+              onSave={details => {
+                setStep({ name: "Schedule", beneficiary, details });
+              }}
+            />
 
-                    <Space height={32} />
+            <Space height={32} />
+          </>
+        ))
+        .with({ name: "Schedule" }, ({ beneficiary, details }) => (
+          <>
+            <TransferWizardBeneficiarySummary
+              isMobile={!large}
+              beneficiary={beneficiary}
+              onPressEdit={
+                hasInitialBeneficiary
+                  ? undefined
+                  : () => setStep({ name: "Beneficiary", beneficiary })
+              }
+            />
 
-                    <TransferWizardBeneficiary
-                      initialBeneficiary={beneficiary}
-                      onSave={beneficiary => setStep({ name: "Details", beneficiary })}
-                    />
-                  </>
-                );
-              })
-              .with({ name: "Details" }, ({ beneficiary, details }) => {
-                return (
-                  <>
-                    <TransferWizardBeneficiarySummary
-                      isMobile={!large}
-                      beneficiary={beneficiary}
-                      onPressEdit={() => setStep({ name: "Beneficiary", beneficiary })}
-                    />
+            <Space height={32} />
 
-                    <Space height={32} />
+            <TransferRegularWizardDetailsSummary
+              isMobile={!large}
+              details={details}
+              onPressEdit={() => {
+                setStep({ name: "Details", beneficiary, details });
+              }}
+            />
 
-                    <LakeHeading level={2} variant="h3">
-                      {t("transfer.new.details.title")}
-                    </LakeHeading>
+            <Space height={32} />
 
-                    <Space height={32} />
+            <LakeHeading level={2} variant="h3">
+              {t("transfer.new.schedule.title")}
+            </LakeHeading>
 
-                    <TransferRegularWizardDetails
-                      accountMembershipId={accountMembershipId}
-                      initialDetails={details}
-                      onPressPrevious={() => setStep({ name: "Beneficiary", beneficiary })}
-                      onSave={details => setStep({ name: "Schedule", beneficiary, details })}
-                    />
+            <Space height={32} />
 
-                    <Space height={32} />
-                  </>
-                );
-              })
-              .with({ name: "Schedule" }, ({ beneficiary, details }) => {
-                return (
-                  <>
-                    <TransferWizardBeneficiarySummary
-                      isMobile={!large}
-                      beneficiary={beneficiary}
-                      onPressEdit={() => setStep({ name: "Beneficiary", beneficiary })}
-                    />
-
-                    <Space height={32} />
-
-                    <TransferRegularWizardDetailsSummary
-                      isMobile={!large}
-                      details={details}
-                      onPressEdit={() => setStep({ name: "Details", beneficiary, details })}
-                    />
-
-                    <Space height={32} />
-
-                    <LakeHeading level={2} variant="h3">
-                      {t("transfer.new.schedule.title")}
-                    </LakeHeading>
-
-                    <Space height={32} />
-
-                    <TransferRegularWizardSchedule
-                      beneficiary={beneficiary}
-                      loading={transfer.isLoading()}
-                      onPressPrevious={() => setStep({ name: "Details", beneficiary, details })}
-                      onSave={schedule => initiateTransfer({ beneficiary, details, schedule })}
-                    />
-                  </>
-                );
-              })
-              .otherwise(() => null)}
-          </ScrollView>
-        </View>
-      )}
-    </ResponsiveContainer>
+            <TransferRegularWizardSchedule
+              beneficiary={beneficiary}
+              loading={transfer.isLoading()}
+              onPressPrevious={() => {
+                setStep({ name: "Details", beneficiary, details });
+              }}
+              onSave={schedule => {
+                initiateTransfer({ beneficiary, details, schedule });
+              }}
+            />
+          </>
+        ))
+        .otherwise(() => null)}
+    </>
   );
 };

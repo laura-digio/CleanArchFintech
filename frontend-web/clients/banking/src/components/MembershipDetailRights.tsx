@@ -1,19 +1,20 @@
-import { Option } from "@swan-io/boxed";
+import { Dict, Option } from "@swan-io/boxed";
+import { useMutation } from "@swan-io/graphql-client";
 import { Fill } from "@swan-io/lake/src/components/Fill";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
 import { LakeLabelledCheckbox } from "@swan-io/lake/src/components/LakeCheckbox";
+import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { Space } from "@swan-io/lake/src/components/Space";
-import { backgroundColor } from "@swan-io/lake/src/constants/design";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { backgroundColor, colors } from "@swan-io/lake/src/constants/design";
 import { identity } from "@swan-io/lake/src/utils/function";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { ConfirmModal } from "@swan-io/shared-business/src/components/ConfirmModal";
 import { CountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
+import { useForm } from "@swan-io/use-form";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useForm } from "react-ux-form";
 import { P, isMatching, match } from "ts-pattern";
 import {
   AccountMembershipFragment,
@@ -22,6 +23,7 @@ import {
   UpdateAccountMembershipDocument,
   UpdateAccountMembershipInput,
 } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { t } from "../utils/i18n";
 import { Router } from "../utils/routes";
 import { MembershipCancelConfirmationModal } from "./MembershipCancelConfirmationModal";
@@ -65,6 +67,12 @@ type FormValues = {
   canManageCards?: boolean;
 };
 
+const validateMustBeFalse = (value: boolean) => {
+  if (value === true) {
+    return "MustBeFalse";
+  }
+};
+
 export const MembershipDetailRights = ({
   editingAccountMembership,
   editingAccountMembershipId,
@@ -74,30 +82,47 @@ export const MembershipDetailRights = ({
   onRefreshRequest,
   large,
 }: Props) => {
+  const { canUpdateAccountMembership } = usePermissions();
+
   const [isCancelConfirmationModalOpen, setIsCancelConfirmationModalOpen] = useState(false);
   const [valuesToConfirm, setValuesToConfirm] = useState<Option<FormValues>>(Option.None());
 
-  const [membershipUpdate, updateMembership] = useUrqlMutation(UpdateAccountMembershipDocument);
-
-  const [membershipSuspension, suspendMembership] = useUrqlMutation(
-    SuspendAccountMembershipDocument,
-  );
-  const [membershipUnsuspension, unsuspendMembership] = useUrqlMutation(
+  const [updateMembership, membershipUpdate] = useMutation(UpdateAccountMembershipDocument);
+  const [suspendMembership, membershipSuspension] = useMutation(SuspendAccountMembershipDocument);
+  const [unsuspendMembership, membershipUnsuspension] = useMutation(
     ResumeAccountMembershipDocument,
   );
 
-  const { Field, submitForm } = useForm({
+  const validateSensitivePermission = match(editingAccountMembership)
+    .with(
+      {
+        statusInfo: {
+          __typename: P.union(
+            "AccountMembershipBindingUserErrorStatusInfo",
+            "AccountMembershipInvitationSentStatusInfo",
+          ),
+          restrictedTo: { phoneNumber: P.nullish },
+        },
+      },
+      () => validateMustBeFalse,
+    )
+    .otherwise(() => undefined);
+
+  const { Field, FieldsListener, submitForm } = useForm({
     canViewAccount: {
       initialValue: editingAccountMembership.canViewAccount,
     },
     canInitiatePayments: {
       initialValue: editingAccountMembership.canInitiatePayments,
+      validate: validateSensitivePermission,
     },
     canManageBeneficiaries: {
       initialValue: editingAccountMembership.canManageBeneficiaries,
+      validate: validateSensitivePermission,
     },
     canManageAccountMembership: {
       initialValue: editingAccountMembership.canManageAccountMembership,
+      validate: validateSensitivePermission,
     },
     canManageCards: {
       initialValue: editingAccountMembership.canManageCards,
@@ -166,6 +191,7 @@ export const MembershipDetailRights = ({
 
         showToast({
           variant: "error",
+          error,
           title: match(error)
             .with(
               {
@@ -186,20 +212,19 @@ export const MembershipDetailRights = ({
   };
 
   const onPressSave = () => {
-    submitForm(rights => {
-      if (
-        requiresIdentityVerification &&
-        (rights.canViewAccount === true ||
-          rights.canInitiatePayments === true ||
-          rights.canManageBeneficiaries === true ||
-          rights.canManageAccountMembership === true ||
-          rights.canManageCards === true)
-      ) {
-        setValuesToConfirm(Option.Some(rights));
-        return;
-      }
+    submitForm({
+      onSuccess: values => {
+        Option.allFromDict(values).map(rights => {
+          const hasAtLeastOneRight = Dict.values(rights).some(right => right === true);
 
-      sendUpdate(rights);
+          if (requiresIdentityVerification && hasAtLeastOneRight) {
+            setValuesToConfirm(Option.Some(rights));
+            return;
+          }
+
+          sendUpdate(rights);
+        });
+      },
     });
   };
 
@@ -215,7 +240,7 @@ export const MembershipDetailRights = ({
         onRefreshRequest();
       })
       .tapError(error => {
-        showToast({ variant: "error", title: translateError(error) });
+        showToast({ variant: "error", error, title: translateError(error) });
       });
   };
 
@@ -237,7 +262,7 @@ export const MembershipDetailRights = ({
         window.location.replace(consentUrl);
       })
       .tapError(error => {
-        showToast({ variant: "error", title: translateError(error) });
+        showToast({ variant: "error", error, title: translateError(error) });
       });
   };
 
@@ -249,6 +274,7 @@ export const MembershipDetailRights = ({
         {({ value, onChange }) => (
           <LakeLabelledCheckbox
             disabled={
+              !canUpdateAccountMembership ||
               currentUserAccountMembership.canViewAccount === false ||
               accountMemberHasBirthDate === false ||
               hasEditableStatus === false ||
@@ -265,9 +291,10 @@ export const MembershipDetailRights = ({
       <Space height={12} />
 
       <Field name="canInitiatePayments">
-        {({ value, onChange }) => (
+        {({ value, onChange, error }) => (
           <LakeLabelledCheckbox
             disabled={
+              !canUpdateAccountMembership ||
               currentUserAccountMembership.canInitiatePayments === false ||
               accountMemberHasBirthDate === false ||
               hasEditableStatus === false ||
@@ -277,6 +304,7 @@ export const MembershipDetailRights = ({
             label={t("membershipDetail.edit.canInitiatePayments")}
             value={value}
             onValueChange={onChange}
+            isError={error != null}
           />
         )}
       </Field>
@@ -284,9 +312,10 @@ export const MembershipDetailRights = ({
       <Space height={12} />
 
       <Field name="canManageBeneficiaries">
-        {({ value, onChange }) => (
+        {({ value, onChange, error }) => (
           <LakeLabelledCheckbox
             disabled={
+              !canUpdateAccountMembership ||
               currentUserAccountMembership.canManageBeneficiaries === false ||
               accountMemberHasBirthDate === false ||
               hasEditableStatus === false ||
@@ -296,6 +325,7 @@ export const MembershipDetailRights = ({
             label={t("membershipDetail.edit.canManageBeneficiaries")}
             value={value}
             onValueChange={onChange}
+            isError={error != null}
           />
         )}
       </Field>
@@ -303,9 +333,10 @@ export const MembershipDetailRights = ({
       <Space height={12} />
 
       <Field name="canManageAccountMembership">
-        {({ value, onChange }) => (
+        {({ value, onChange, error }) => (
           <LakeLabelledCheckbox
             disabled={
+              !canUpdateAccountMembership ||
               currentUserAccountMembership.canManageAccountMembership === false ||
               accountMemberHasBirthDate === false ||
               hasEditableStatus === false ||
@@ -315,6 +346,7 @@ export const MembershipDetailRights = ({
             label={t("membershipDetail.edit.canManageAccountMembership")}
             value={value}
             onValueChange={onChange}
+            isError={error != null}
           />
         )}
       </Field>
@@ -325,6 +357,7 @@ export const MembershipDetailRights = ({
         {({ value, onChange }) => (
           <LakeLabelledCheckbox
             disabled={
+              !canUpdateAccountMembership ||
               currentUserAccountMembership.canManageCards === false ||
               accountMemberHasBirthDate === false ||
               hasEditableStatus === false ||
@@ -337,6 +370,24 @@ export const MembershipDetailRights = ({
           />
         )}
       </Field>
+
+      <FieldsListener
+        names={["canInitiatePayments", "canManageAccountMembership", "canManageBeneficiaries"]}
+      >
+        {({ canInitiatePayments, canManageAccountMembership, canManageBeneficiaries }) =>
+          canInitiatePayments.error != null ||
+          canManageAccountMembership.error != null ||
+          canManageBeneficiaries.error != null ? (
+            <>
+              <Space height={16} />
+
+              <LakeText color={colors.negative[500]}>
+                {t("membershipDetail.edit.sensitivePermissionsRequirePhoneNumber")}
+              </LakeText>
+            </>
+          ) : null
+        }
+      </FieldsListener>
 
       <Fill minHeight={24} />
 
@@ -353,20 +404,25 @@ export const MembershipDetailRights = ({
                   ),
                 },
               },
-              () => (
-                <LakeButton
-                  color="current"
-                  loading={membershipUpdate.isLoading() && valuesToConfirm.isNone()}
-                  disabled={isEditingCurrentUserAccountMembership}
-                  onPress={onPressSave}
-                >
-                  {t("common.save")}
-                </LakeButton>
-              ),
+              () =>
+                canUpdateAccountMembership && !isEditingCurrentUserAccountMembership ? (
+                  <LakeButton
+                    color="current"
+                    loading={membershipUpdate.isLoading() && valuesToConfirm.isNone()}
+                    disabled={isEditingCurrentUserAccountMembership}
+                    onPress={onPressSave}
+                  >
+                    {t("common.save")}
+                  </LakeButton>
+                ) : null,
             )
             .otherwise(() => null)}
 
-          {match({ isEditingCurrentUserAccountMembership, editingAccountMembership })
+          {match({
+            isEditingCurrentUserAccountMembership,
+            editingAccountMembership,
+            canUpdateAccountMembership,
+          })
             .with(
               // Can't suspend yourself
               { isEditingCurrentUserAccountMembership: true },
@@ -374,6 +430,7 @@ export const MembershipDetailRights = ({
               {
                 editingAccountMembership: { legalRepresentative: true },
               },
+              { canUpdateAccountMembership: false },
               () => null,
             )
             .with(

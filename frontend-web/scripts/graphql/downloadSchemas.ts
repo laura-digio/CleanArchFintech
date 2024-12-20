@@ -1,30 +1,9 @@
 import { IntrospectionQuery, buildClientSchema, getIntrospectionQuery, printSchema } from "graphql";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "pathe";
-import { string, validate } from "valienv";
 
 const query = getIntrospectionQuery();
-
-const env = validate({
-  env: process.env,
-  validators: {
-    PARTNER_ADMIN_API_URL: string,
-    PARTNER_API_URL: string,
-    UNAUTHENTICATED_API_URL: string,
-  },
-});
-
-const ignoredObjects = new Set([
-  "Query",
-  "Mutation",
-  "Subscription",
-  "__Schema",
-  "__Type",
-  "__Field",
-  "__InputValue",
-  "__EnumValue",
-  "__Directive",
-]);
 
 const getIntrospection = (name: string, url: string) =>
   fetch(url, {
@@ -35,24 +14,6 @@ const getIntrospection = (name: string, url: string) =>
     .then(res => res.json())
     .then(res => res as { data: IntrospectionQuery })
     .then(res => res.data)
-    .then(res => {
-      const idLessObjects = res.__schema.types
-        .filter(
-          item =>
-            !ignoredObjects.has(item.name) &&
-            item.kind === "OBJECT" &&
-            !item.fields.some(field => field.name === "id"),
-        )
-        .map(item => item.name);
-
-      fs.writeFileSync(
-        path.join(__dirname, `dist/${name}-idless-objects.json`),
-        JSON.stringify(idLessObjects, null, 2) + "\n",
-        "utf-8",
-      );
-
-      return res;
-    })
     .then(res => buildClientSchema(res))
     .then(res => printSchema(res))
     .then(schema =>
@@ -63,7 +24,18 @@ const getIntrospection = (name: string, url: string) =>
       process.exit(1);
     });
 
-// TODO: Enable download once the introspection is allowed in production
-// void getIntrospection("partner-admin", env.PARTNER_ADMIN_API_URL);
-void getIntrospection("partner", env.PARTNER_API_URL);
-void getIntrospection("unauthenticated", env.UNAUTHENTICATED_API_URL);
+void Promise.all([
+  getIntrospection("partner-admin", "https://api.swan.io/sandbox-partner-admin/graphql"),
+  getIntrospection("partner", "https://api.swan.io/live-partner/graphql"),
+  getIntrospection("unauthenticated", "https://api.swan.io/live-unauthenticated/graphql"),
+]).then(() => {
+  execSync(
+    `generate-schema-config scripts/graphql/dist/partner-admin-schema.gql scripts/graphql/dist/partner-admin-schema-config.json`,
+  );
+  execSync(
+    `generate-schema-config scripts/graphql/dist/partner-schema.gql scripts/graphql/dist/partner-schema-config.json`,
+  );
+  execSync(
+    `generate-schema-config scripts/graphql/dist/unauthenticated-schema.gql scripts/graphql/dist/unauthenticated-schema-config.json`,
+  );
+});

@@ -1,17 +1,17 @@
-import { Dict } from "@swan-io/boxed";
+import { Dict, Future } from "@swan-io/boxed";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Fill } from "@swan-io/lake/src/components/Fill";
 import { FilterChooser } from "@swan-io/lake/src/components/FilterChooser";
+import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
+import { LakeSearchField } from "@swan-io/lake/src/components/LakeSearchField";
+import { Space } from "@swan-io/lake/src/components/Space";
+import { emptyToUndefined, isNotNullish } from "@swan-io/lake/src/utils/nullish";
 import {
   FilterCheckboxDef,
   FilterDateDef,
   FiltersStack,
   FiltersState,
-} from "@swan-io/lake/src/components/Filters";
-import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
-import { LakeSearchField } from "@swan-io/lake/src/components/LakeSearchField";
-import { Space } from "@swan-io/lake/src/components/Space";
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+} from "@swan-io/shared-business/src/components/Filters";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { TransactionStatus } from "../graphql/partner";
 import { locale, t } from "../utils/i18n";
@@ -49,7 +49,6 @@ type SimplifiedPaymentProduct = "Card" | "Check" | "Fees" | "CreditTransfer" | "
 const paymentProductFilter: FilterCheckboxDef<SimplifiedPaymentProduct> = {
   type: "checkbox",
   label: t("transactionList.filter.paymentMethod"),
-  submitText: t("common.filters.apply"),
   checkAllLabel: t("common.filters.all"),
   items: [
     { value: "Card", label: t("paymentMethod.card") },
@@ -63,7 +62,6 @@ const paymentProductFilter: FilterCheckboxDef<SimplifiedPaymentProduct> = {
 const statusFilter: FilterCheckboxDef<TransactionStatus> = {
   type: "checkbox",
   label: t("transactionList.filter.status"),
-  submitText: t("common.filters.apply"),
   checkAllLabel: t("common.filters.all"),
   items: [
     { value: "Pending", label: t("transactionStatus.pending") },
@@ -80,21 +78,17 @@ export const defaultFiltersDefinition = {
   status: statusFilter,
 };
 
-export type TransactionFiltersState = Omit<
-  FiltersState<typeof defaultFiltersDefinition>,
-  "paymentProduct"
-> & {
-  search: string | undefined;
-  paymentProduct: SimplifiedPaymentProduct[] | undefined;
-};
+export type TransactionFilters = FiltersState<typeof defaultFiltersDefinition>;
 
 type TransactionListFilterProps = {
-  filters: TransactionFiltersState;
-  onChange: (values: Partial<TransactionFiltersState>) => void;
-  onRefresh: () => void;
-  available?: readonly (keyof TransactionFiltersState)[];
+  available?: readonly (keyof TransactionFilters)[];
   children?: ReactNode;
   large?: boolean;
+  filters: TransactionFilters;
+  search: string | undefined;
+  onChangeFilters: (filters: Partial<TransactionFilters>) => void;
+  onRefresh: () => Future<unknown>;
+  onChangeSearch: (search: string | undefined) => void;
   filtersDefinition?: {
     isAfterUpdatedAt: FilterDateDef;
     isBeforeUpdatedAt: FilterDateDef;
@@ -112,21 +106,19 @@ const defaultAvailableFilters = [
 ] as const;
 
 export const TransactionListFilter = ({
-  filters,
-  children,
-  onChange,
-  onRefresh,
-  large = true,
   available = defaultAvailableFilters,
+  children,
+  large = true,
+  filters,
+  search,
+  onChangeFilters,
+  onRefresh,
+  onChangeSearch,
   filtersDefinition = defaultFiltersDefinition,
 }: TransactionListFilterProps) => {
-  const filtersWithoutSearch = useMemo(() => {
-    const { search, ...filtersWithoutSearch } = filters;
-    return filtersWithoutSearch;
-  }, [filters]);
-
   const availableSet = useMemo(() => new Set(available), [available]);
-  const availableFilters: { name: keyof typeof filtersWithoutSearch; label: string }[] = useMemo(
+
+  const availableFilters: { name: keyof TransactionFilters; label: string }[] = useMemo(
     () =>
       (
         [
@@ -152,7 +144,7 @@ export const TransactionListFilter = ({
   );
 
   const [openFilters, setOpenFilters] = useState(() =>
-    Dict.entries(filtersWithoutSearch)
+    Dict.entries(filters)
       .filter(([, value]) => isNotNullish(value))
       .map(([name]) => name),
   );
@@ -160,12 +152,14 @@ export const TransactionListFilter = ({
   useEffect(() => {
     setOpenFilters(openFilters => {
       const currentlyOpenFilters = new Set(openFilters);
-      const openFiltersNotYetInState = Dict.entries(filtersWithoutSearch)
+      const openFiltersNotYetInState = Dict.entries(filters)
         .filter(([name, value]) => isNotNullish(value) && !currentlyOpenFilters.has(name))
         .map(([name]) => name);
       return [...openFilters, ...openFiltersNotYetInState];
     });
-  }, [filtersWithoutSearch]);
+  }, [filters]);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   return (
     <>
@@ -179,10 +173,9 @@ export const TransactionListFilter = ({
         ) : null}
 
         <FilterChooser
-          filters={filtersWithoutSearch}
+          filters={filters}
           openFilters={openFilters}
           label={t("common.filters")}
-          title={t("common.chooseFilter")}
           onAddFilter={filter => setOpenFilters(openFilters => [...openFilters, filter])}
           availableFilters={availableFilters}
           large={large}
@@ -197,7 +190,11 @@ export const TransactionListFilter = ({
               mode="secondary"
               size="small"
               icon="arrow-counterclockwise-filled"
-              onPress={onRefresh}
+              loading={isRefreshing}
+              onPress={() => {
+                setIsRefreshing(true);
+                onRefresh().tap(() => setIsRefreshing(false));
+              }}
             />
           </>
         ) : null}
@@ -206,8 +203,8 @@ export const TransactionListFilter = ({
 
         <LakeSearchField
           placeholder={t("common.search")}
-          initialValue={filters.search ?? ""}
-          onChangeText={search => onChange({ ...filters, search })}
+          initialValue={search ?? ""}
+          onChangeText={text => onChangeSearch(emptyToUndefined(text))}
         />
       </Box>
 
@@ -215,9 +212,9 @@ export const TransactionListFilter = ({
 
       <FiltersStack
         definition={filtersDefinition}
-        filters={filtersWithoutSearch}
+        filters={filters}
         openedFilters={openFilters}
-        onChangeFilters={value => onChange({ ...value, search: filters.search })}
+        onChangeFilters={onChangeFilters}
         onChangeOpened={setOpenFilters}
       />
     </>

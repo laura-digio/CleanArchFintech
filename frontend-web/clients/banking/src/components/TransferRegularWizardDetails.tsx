@@ -1,4 +1,5 @@
-import { AsyncData, Result } from "@swan-io/boxed";
+import { AsyncData, Option, Result } from "@swan-io/boxed";
+import { useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
 import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
@@ -10,10 +11,10 @@ import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { animations, colors } from "@swan-io/lake/src/constants/design";
-import { useUrqlQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { nullishOrEmptyToUndefined } from "@swan-io/lake/src/utils/nullish";
+import { emptyToUndefined } from "@swan-io/lake/src/utils/nullish";
+import { toOptionalValidator, useForm } from "@swan-io/use-form";
+import { useLayoutEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { hasDefinedKeys, toOptionalValidator, useForm } from "react-ux-form";
 import { P, match } from "ts-pattern";
 import { GetAvailableAccountBalanceDocument } from "../graphql/partner";
 import { formatCurrency, t } from "../utils/i18n";
@@ -37,6 +38,7 @@ export type Details = {
 };
 
 type Props = {
+  isAccountClosing: boolean;
   accountMembershipId: string;
   initialDetails?: Details;
   onPressPrevious: () => void;
@@ -44,20 +46,15 @@ type Props = {
 };
 
 export const TransferRegularWizardDetails = ({
+  isAccountClosing,
   accountMembershipId,
   initialDetails,
   onPressPrevious,
   onSave,
 }: Props) => {
-  const { data } = useUrqlQuery(
-    {
-      query: GetAvailableAccountBalanceDocument,
-      variables: { accountMembershipId },
-    },
-    [accountMembershipId],
-  );
+  const [data] = useQuery(GetAvailableAccountBalanceDocument, { accountMembershipId });
 
-  const { Field, submitForm } = useForm({
+  const { Field, setFieldValue, submitForm } = useForm({
     amount: {
       initialValue: initialDetails?.amount.value ?? "",
       sanitize: value => value.replace(/,/g, "."),
@@ -78,18 +75,43 @@ export const TransferRegularWizardDetails = ({
     },
   });
 
-  const onPressSubmit = () => {
-    submitForm(values => {
-      if (hasDefinedKeys(values, ["amount"])) {
-        onSave({
-          amount: {
-            value: values.amount,
-            currency: "EUR",
+  useLayoutEffect(() => {
+    if (isAccountClosing) {
+      match(data)
+        .with(
+          AsyncData.P.Done(
+            Result.P.Ok({
+              accountMembership: { account: { balances: { available: { value: P.select() } } } },
+            }),
+          ),
+          value => {
+            setFieldValue("amount", value);
           },
-          label: nullishOrEmptyToUndefined(values.label),
-          reference: nullishOrEmptyToUndefined(values.reference),
-        });
-      }
+        )
+        .otherwise(() => {});
+    }
+  }, [isAccountClosing, data, setFieldValue]);
+
+  const onPressSubmit = () => {
+    submitForm({
+      onSuccess: values => {
+        const { amount } = values;
+
+        if (amount.isSome()) {
+          onSave({
+            amount: {
+              value: amount.get(),
+              currency: "EUR",
+            },
+            label: values.label
+              .flatMap(value => Option.fromUndefined(emptyToUndefined(value)))
+              .toUndefined(),
+            reference: values.reference
+              .flatMap(value => Option.fromUndefined(emptyToUndefined(value)))
+              .toUndefined(),
+          });
+        }
+      },
     });
   };
 
@@ -97,7 +119,7 @@ export const TransferRegularWizardDetails = ({
     <>
       {match(data)
         .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => (
-          <ActivityIndicator color={colors.gray[900]} />
+          <ActivityIndicator color={colors.gray[500]} />
         ))
         .with(AsyncData.P.Done(Result.P.Ok(P.select())), data => {
           const availableBalance = data.accountMembership?.account?.balances?.available;

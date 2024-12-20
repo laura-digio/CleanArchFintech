@@ -1,17 +1,10 @@
 import dotenv from "dotenv";
 import path from "pathe";
-import { Validator, boolean, string, validate } from "valienv";
+import { boolean, string, url, validate } from "valienv";
 
 dotenv.config({
   path: path.resolve(__dirname, "../../.env.e2e"),
 });
-
-const url: Validator<string> = (value = "") => {
-  try {
-    new URL(value);
-    return value;
-  } catch {} // eslint-disable-line no-empty
-};
 
 export const env = validate({
   env: {
@@ -30,14 +23,12 @@ export const env = validate({
 
     BANKING_URL: url,
     ONBOARDING_URL: url,
+    PAYMENT_URL: url,
 
     TEST_KEY: string,
 
     PHONE_NUMBER: string,
     PASSCODE: string,
-
-    SANDBOX_USER_BENADY_ID: string,
-    SANDBOX_USER_SAISON_ID: string,
 
     TWILIO_ACCOUNT_ID: string,
     TWILIO_AUTH_TOKEN: string,

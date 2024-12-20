@@ -1,4 +1,5 @@
-import { AsyncData, Dict, Result } from "@swan-io/boxed";
+import { AsyncData, Dict, Option, Result } from "@swan-io/boxed";
+import { useMutation, useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Fill } from "@swan-io/lake/src/components/Fill";
 import { Icon } from "@swan-io/lake/src/components/Icon";
@@ -10,32 +11,34 @@ import { Item, LakeSelect } from "@swan-io/lake/src/components/LakeSelect";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { LakeTextInput } from "@swan-io/lake/src/components/LakeTextInput";
 import { Link } from "@swan-io/lake/src/components/Link";
+import { ScrollView } from "@swan-io/lake/src/components/ScrollView";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile, TileGrid } from "@swan-io/lake/src/components/Tile";
 import { TilePlaceholder } from "@swan-io/lake/src/components/TilePlaceholder";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { identity } from "@swan-io/lake/src/utils/function";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import {
   isNotEmpty,
   isNotNullish,
   isNullish,
   isNullishOrEmpty,
 } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToPromise, parseOperationResult } from "@swan-io/lake/src/utils/urql";
+import { pick } from "@swan-io/lake/src/utils/object";
+import { trim } from "@swan-io/lake/src/utils/string";
 import { TaxIdentificationNumberInput } from "@swan-io/shared-business/src/components/TaxIdentificationNumberInput";
 import { CountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
 import {
   validateCompanyTaxNumber,
   validateIndividualTaxNumber,
 } from "@swan-io/shared-business/src/utils/validation";
+import { combineValidators, toOptionalValidator, useForm } from "@swan-io/use-form";
 import { ReactNode, useMemo } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { combineValidators, hasDefinedKeys, toOptionalValidator, useForm } from "react-ux-form";
+import { StyleSheet, View } from "react-native";
 import { P, match } from "ts-pattern";
-import { useMutation } from "urql";
 import { ErrorView } from "../components/ErrorView";
 import {
   AccountDetailsSettingsPageDocument,
@@ -43,8 +46,8 @@ import {
   AccountLanguage,
   UpdateAccountDocument,
 } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { t } from "../utils/i18n";
-import { isUnauthorizedError } from "../utils/urql";
 import {
   validateAccountNameLength,
   validateRequired,
@@ -101,14 +104,14 @@ const Contract = ({ children, to }: { children: ReactNode; to: string }) => (
 const UpdateAccountForm = ({
   accountId,
   account,
-  canManageAccountMembership,
+  projectInfo,
 }: {
   accountId: string;
   account: NonNullable<AccountDetailsSettingsPageQuery["account"]>;
-  canManageAccountMembership: boolean;
+  projectInfo: NonNullable<AccountDetailsSettingsPageQuery["projectInfo"]>;
 }) => {
   const accountCountry = account.country ?? "FRA";
-  const [, updateAccount] = useMutation(UpdateAccountDocument);
+  const [updateAccount] = useMutation(UpdateAccountDocument);
 
   const holderInfo = account.holder.info;
   const isCompany = holderInfo?.__typename === "AccountHolderCompanyInfo";
@@ -121,7 +124,7 @@ const UpdateAccountForm = ({
   }>({
     accountName: {
       initialValue: account.name ?? "",
-      sanitize: value => value.trim(),
+      sanitize: trim,
       validate: combineValidators(validateRequired, validateAccountNameLength),
     },
     language: {
@@ -131,12 +134,12 @@ const UpdateAccountForm = ({
     },
     vatNumber: {
       initialValue: isCompany && isNotNullish(holderInfo.vatNumber) ? holderInfo.vatNumber : "",
-      sanitize: value => value.trim(),
+      sanitize: trim,
       validate: toOptionalValidator(validateVatNumber),
     },
     taxIdentificationNumber: {
       initialValue: holderInfo?.taxIdentificationNumber ?? "",
-      sanitize: value => value.trim(),
+      sanitize: trim,
       validate: isCompany
         ? validateCompanyTaxNumber(accountCountry)
         : validateIndividualTaxNumber(accountCountry),
@@ -152,6 +155,7 @@ const UpdateAccountForm = ({
       it: { name: "Italiano", cca3: "ITA" },
       nl: { name: "Nederlands", cca3: "NLD" },
       pt: { name: "Português", cca3: "PRT" },
+      fi: { name: "Suomi", cca3: "FIN" },
     };
 
     return Dict.entries(map).map(([value, { name }]) => ({
@@ -162,11 +166,12 @@ const UpdateAccountForm = ({
 
   const { statusInfo } = account;
   const accountClosed = statusInfo.status === "Closing" || statusInfo.status === "Closed";
-  const formDisabled = !canManageAccountMembership || accountClosed;
+  const { canUpdateAccount } = usePermissions();
+  const formDisabled = !canUpdateAccount || accountClosed;
   const shouldEditTaxIdentificationNumber =
     account.country === "DEU" && account.holder.residencyAddress.country === "DEU";
 
-  const tcuUrl = account.holder.onboarding?.tcuUrl;
+  const legalDocuments = account.legalDocuments?.edges.map(value => value.node.url);
 
   return (
     <View>
@@ -175,13 +180,6 @@ const UpdateAccountForm = ({
       </LakeHeading>
 
       <Space height={12} />
-
-      {accountClosed && (
-        <>
-          <LakeAlert variant="warning" title={t("accountDetails.alert.accountClosed")} />
-          <Space height={20} />
-        </>
-      )}
 
       <Tile paddingVertical={24}>
         <LakeLabel
@@ -304,20 +302,30 @@ const UpdateAccountForm = ({
 
       <Space height={32} />
 
-      <LakeHeading level={2} variant="h4">
-        {t("accountDetails.title.contracts")}
-      </LakeHeading>
+      {isNotNullish(legalDocuments) && legalDocuments.length > 0 ? (
+        <>
+          <LakeHeading level={2} variant="h4">
+            {t("accountDetails.title.contracts")}
+          </LakeHeading>
 
-      <Space height={12} />
-      <LakeText>{t("accountDetails.settings.contractsDescription")}</LakeText>
-      <Space height={12} />
+          <Space height={12} />
+          <LakeText>{t("accountDetails.settings.contractsDescription")}</LakeText>
+          <Space height={12} />
 
-      {isNotNullish(tcuUrl) ? (
-        <TileGrid>
-          <Contract to={tcuUrl}>{t("accountDetails.swanTermsAndConditions")}</Contract>
+          <TileGrid breakpoint={500}>
+            {legalDocuments.map(legalDocument => (
+              <Contract key={legalDocument} to={legalDocument}>
+                {t("accountDetails.swanTermsAndConditions")}
+              </Contract>
+            ))}
 
-          {/* <Contract to="#">{t("accountDetails.settings.partnershipConditions", { projectName })}</Contract> */}
-        </TileGrid>
+            <Contract to={projectInfo.tcuDocumentUri}>
+              {t("accountDetails.settings.partnershipConditions", {
+                projectName: projectInfo.name,
+              })}
+            </Contract>
+          </TileGrid>
+        </>
       ) : null}
 
       {!formDisabled && (
@@ -326,33 +334,43 @@ const UpdateAccountForm = ({
             color="partner"
             loading={formStatus === "submitting"}
             onPress={() => {
-              submitForm(values => {
-                if (hasDefinedKeys(values, ["accountName", "language"])) {
-                  const { accountName, language, vatNumber, taxIdentificationNumber } = values;
+              submitForm({
+                onSuccess: values => {
+                  const option = Option.allFromDict(pick(values, ["accountName", "language"]));
 
-                  return updateAccount({
-                    updateAccountInput: {
-                      accountId,
-                      name: accountName,
-                      language,
-                    },
-                    updateAccountHolderInput: {
-                      accountHolderId: account.holder.id,
-                      vatNumber,
-                      taxIdentificationNumber,
-                    },
-                  })
-                    .then(parseOperationResult)
-                    .then(({ updateAccount, updateAccountHolder }) =>
-                      Promise.all([
-                        filterRejectionsToPromise(updateAccount),
-                        filterRejectionsToPromise(updateAccountHolder),
-                      ]),
-                    )
-                    .catch(error => {
-                      showToast({ variant: "error", title: translateError(error) });
-                    });
-                }
+                  if (option.isSome()) {
+                    const { accountName, language } = option.get();
+                    const { vatNumber, taxIdentificationNumber } = values;
+
+                    return updateAccount({
+                      updateAccountInput: {
+                        accountId,
+                        name: accountName,
+                        language,
+                      },
+                      updateAccountHolderInput: {
+                        accountHolderId: account.holder.id,
+                        vatNumber: vatNumber.match({
+                          Some: identity,
+                          None: () => undefined,
+                        }),
+                        taxIdentificationNumber: taxIdentificationNumber.match({
+                          Some: identity,
+                          None: () => undefined,
+                        }),
+                      },
+                    })
+                      .mapOkToResult(({ updateAccount, updateAccountHolder }) =>
+                        Result.all([
+                          filterRejectionsToResult(updateAccount),
+                          filterRejectionsToResult(updateAccountHolder),
+                        ]),
+                      )
+                      .tapError((error: unknown) => {
+                        showToast({ variant: "error", error, title: translateError(error) });
+                      });
+                  }
+                },
               });
             }}
           >
@@ -369,39 +387,32 @@ const UpdateAccountForm = ({
 };
 
 type Props = {
-  projectName: string;
+  accountMembershipLanguage: AccountLanguage;
   accountId: string;
-  canManageAccountMembership: boolean;
   largeBreakpoint: boolean;
 };
 
 export const AccountDetailsSettingsPage = ({
-  // projectName,
+  accountMembershipLanguage,
   accountId,
-  canManageAccountMembership,
   largeBreakpoint,
 }: Props) => {
-  const { data } = useUrqlQuery(
-    { query: AccountDetailsSettingsPageDocument, variables: { accountId } },
-    [],
-  );
+  const [data] = useQuery(AccountDetailsSettingsPageDocument, {
+    accountId,
+    filters: { status: "Active", type: "SwanTCU" },
+    language: accountMembershipLanguage,
+  });
 
   return (
     <ScrollView contentContainerStyle={[styles.content, largeBreakpoint && styles.contentDesktop]}>
       {match(data)
         .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => <TilePlaceholder />)
-        .with(AsyncData.P.Done(Result.P.Error(P.select())), error =>
-          isUnauthorizedError(error) ? <></> : <ErrorView error={error} />,
-        )
-        .with(AsyncData.P.Done(Result.P.Ok(P.select())), ({ account }) =>
+        .with(AsyncData.P.Done(Result.P.Error(P.select())), error => <ErrorView error={error} />)
+        .with(AsyncData.P.Done(Result.P.Ok(P.select())), ({ account, projectInfo }) =>
           isNullish(account) ? (
             <NotFoundPage />
           ) : (
-            <UpdateAccountForm
-              accountId={accountId}
-              account={account}
-              canManageAccountMembership={canManageAccountMembership}
-            />
+            <UpdateAccountForm accountId={accountId} account={account} projectInfo={projectInfo} />
           ),
         )
         .exhaustive()}

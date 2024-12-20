@@ -1,13 +1,15 @@
 import { Option } from "@swan-io/boxed";
-import { createGroup, createRouter } from "@swan-io/chicane";
+import { InferRoutes, createGroup, createRouter } from "@swan-io/chicane";
 import { P, match } from "ts-pattern";
 import { projectConfiguration } from "./projectId";
 
 const routes = {
-  PopupCallback: "/swanpopupcallback",
+  PopupCallback: "/swanpopupcallback?:redirectTo",
 
-  ProjectLogin: "/login?:sessionExpired",
+  ProjectLogin: "/login?:sessionExpired&:redirectTo",
   ProjectRootRedirect: "/?:to&:source",
+
+  AccountClose: "/accounts/:accountId/close?:resourceId&:status",
 
   ...createGroup("Account", "/:accountMembershipId", {
     Area: "/*",
@@ -29,10 +31,11 @@ const routes = {
         "List",
         // transactionStatus[] is for filters
         // status is the consent status automatically set by consent redirection
-        "/?:isAfterUpdatedAt&:isBeforeUpdatedAt&:paymentProduct[]&:search&:transactionStatus[]&:standingOrder&:consentId&:status",
+        "/?:isAfterUpdatedAt&:isBeforeUpdatedAt&:paymentProduct[]&:search&:transactionStatus[]&:kind{transfer|standingOrder|beneficiary}&:consentId&:status",
         {
           Area: "/*",
           Root: "/",
+          Detail: "/:transactionId",
           ...createGroup("Statements", "/statements", {
             Area: "/*",
             Root: "/monthly",
@@ -43,19 +46,31 @@ const routes = {
       Upcoming: "/upcoming",
     }),
 
-    ...createGroup("Payments", "/payments?:standingOrder&:consentId&:status", {
-      Area: "/*",
-      Root: "/?:isAfterUpdatedAt&:isBeforeUpdatedAt&:search&:transactionStatus[]",
-      New: "/new?:type",
-      RecurringTransferList: "/recurring-transfer/list",
-      RecurringTransferNew: "/recurring-transfer/new",
-
-      ...createGroup("RecurringTransferDetails", "/recurring-transfer/:recurringTransferId", {
+    ...createGroup(
+      "Payments",
+      "/payments?:kind{transfer|standingOrder|beneficiary}&:consentId&:status",
+      {
         Area: "/*",
-        Root: "/",
-        History: "/history",
-      }),
-    }),
+        Root: "/?:isAfterUpdatedAt&:isBeforeUpdatedAt&:search&:transactionStatus[]",
+        New: "/new?:type{transfer|recurring|international|bulk}",
+        RecurringTransferList: "/recurring-transfer/list",
+        RecurringTransferNew: "/recurring-transfer/new",
+
+        BeneficiariesNew: "/beneficiaries/new?:type{sepa|international}",
+
+        // share filters
+        ...createGroup("Beneficiaries", "/beneficiaries?:canceled{true}&:currency&:label&:type[]", {
+          List: "/",
+          Details: "/:beneficiaryId?:tab{details|transfers}&:new{transfer|international}&:search",
+        }),
+
+        ...createGroup("RecurringTransferDetails", "/recurring-transfer/:recurringTransferId", {
+          Area: "/*",
+          Root: "/",
+          History: "/history",
+        }),
+      },
+    ),
 
     ...createGroup("Cards", "/cards?:new", {
       Area: "/*",
@@ -85,45 +100,24 @@ const routes = {
         }),
       },
     ),
+
+    ...createGroup("Merchants", "/merchants?:new", {
+      Area: "/*",
+      Root: "/?:new{true}",
+      List: "/profiles?:status{Active|Inactive}",
+
+      ...createGroup("Profile", "/:merchantProfileId", {
+        Area: "/*",
+        Settings: "/settings?:check{declare|next}",
+        ...createGroup("PaymentLink", "/payment-links?:status{Active|Archived}&:search", {
+          Area: "/*",
+          List: "/",
+          Details: "/:paymentLinkId",
+        }),
+      }),
+    }),
   }),
 } as const;
-
-export type RouteName = keyof typeof routes;
-
-export const accountMinimalRoutes = ["AccountRoot", "AccountProfile"] as const;
-
-export const historyMenuRoutes = ["AccountTransactionsArea", "AccountActivation"] as const;
-
-export const paymentMenuRoutes = ["AccountPaymentsArea"] as const;
-
-export const paymentRoutes = [
-  "AccountPaymentsRoot",
-  "AccountPaymentsNew",
-  "AccountPaymentsRecurringTransferList",
-  "AccountPaymentsRecurringTransferDetailsArea",
-] as const;
-
-export const accountAreaRoutes = [
-  "AccountTransactionsArea",
-  "AccountPaymentsArea",
-  "AccountCardsArea",
-  "AccountMembersArea",
-  "AccountDetailsArea",
-] as const;
-
-export const accountTransactionsRoutes = [
-  "AccountTransactionsListRoot",
-  "AccountTransactionsListStatementsArea",
-  "AccountTransactionsUpcoming",
-] as const;
-
-export const membershipsRoutes = ["AccountMembersList", "AccountMembersDetailsArea"] as const;
-
-export const membershipsDetailRoutes = [
-  "AccountMembersDetailsRoot",
-  "AccountMembersDetailsRights",
-  "AccountMembersDetailsCardList",
-] as const;
 
 export const Router = createRouter(routes, {
   basePath: match(projectConfiguration)
@@ -133,3 +127,48 @@ export const Router = createRouter(routes, {
     )
     .otherwise(() => undefined),
 });
+
+type Routes = InferRoutes<typeof Router>;
+
+export type RouteName = keyof Routes;
+export type GetRouteParams<T extends RouteName> = Routes[T];
+
+export const accountRoutes = [
+  "AccountRoot",
+  "AccountProfile",
+  "AccountActivation",
+  "AccountTransactionsArea",
+  "AccountDetailsArea",
+  "AccountPaymentsArea",
+  "AccountCardsArea",
+  "AccountMembersArea",
+  "AccountMerchantsArea",
+] as const satisfies RouteName[];
+
+export const paymentRoutes = [
+  "AccountPaymentsRoot",
+  "AccountPaymentsNew",
+  "AccountPaymentsRecurringTransferList",
+  "AccountPaymentsRecurringTransferDetailsArea",
+  "AccountPaymentsBeneficiariesList",
+  "AccountPaymentsBeneficiariesDetails",
+  "AccountPaymentsBeneficiariesNew",
+] as const satisfies RouteName[];
+
+export const accountTransactionsRoutes = [
+  "AccountTransactionsListRoot",
+  "AccountTransactionsListStatementsArea",
+  "AccountTransactionsUpcoming",
+  "AccountTransactionsListDetail",
+] as const satisfies RouteName[];
+
+export const membershipsRoutes = [
+  "AccountMembersList",
+  "AccountMembersDetailsArea",
+] as const satisfies RouteName[];
+
+export const membershipsDetailRoutes = [
+  "AccountMembersDetailsRoot",
+  "AccountMembersDetailsRights",
+  "AccountMembersDetailsCardList",
+] as const satisfies RouteName[];

@@ -5,6 +5,7 @@ import { LakeSelect } from "@swan-io/lake/src/components/LakeSelect";
 import { ProjectEnvTag } from "@swan-io/lake/src/components/ProjectEnvTag";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
+import { spacings } from "@swan-io/lake/src/constants/design";
 import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { env } from "../utils/env";
@@ -20,16 +21,10 @@ const styles = StyleSheet.create({
   },
   containerDesktop: {
     paddingHorizontal: 40,
-    paddingVertical: 40,
+    paddingVertical: spacings[24],
   },
   logo: {
     maxWidth: "120px",
-  },
-  languagesSelectContainer: {
-    width: 140,
-  },
-  languagesSelectContainerDesktop: {
-    width: 200,
   },
   languagesSelect: {
     alignItems: "flex-end",
@@ -77,9 +72,7 @@ export const OnboardingHeader = ({ projectName, projectLogo }: Props) => {
 
           <Fill minWidth={12} />
 
-          <View
-            style={small ? styles.languagesSelectContainer : styles.languagesSelectContainerDesktop}
-          >
+          <View>
             <LakeSelect
               value={locale.language}
               items={languageOptions}

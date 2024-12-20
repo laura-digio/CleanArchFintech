@@ -1,5 +1,8 @@
+import { Option } from "@swan-io/boxed";
+import { ClientContext } from "@swan-io/graphql-client";
 import { Avatar } from "@swan-io/lake/src/components/Avatar";
 import { BottomPanel } from "@swan-io/lake/src/components/BottomPanel";
+import { Box } from "@swan-io/lake/src/components/Box";
 import { Fill } from "@swan-io/lake/src/components/Fill";
 import { Icon } from "@swan-io/lake/src/components/Icon";
 import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
@@ -21,19 +24,21 @@ import {
   spacings,
 } from "@swan-io/lake/src/constants/design";
 import { insets } from "@swan-io/lake/src/constants/insets";
-import { showToast } from "@swan-io/lake/src/state/toasts";
-import { isNotEmpty } from "@swan-io/lake/src/utils/nullish";
-import { AdditionalInfo } from "@swan-io/shared-business/src/components/SupportChat";
+import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { Request, badStatusToError } from "@swan-io/request";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { P, match } from "ts-pattern";
-import { AccountAreaQuery, IdentificationStatus } from "../graphql/partner";
+import { AccountAreaQuery, IdentificationLevelFragment } from "../graphql/partner";
+import { env } from "../utils/env";
+import { partnerAdminClient } from "../utils/gql";
 import { t } from "../utils/i18n";
-import { logFrontendError } from "../utils/logger";
-import { Router, accountAreaRoutes } from "../utils/routes";
+import { Router, accountRoutes } from "../utils/routes";
 import { AccountNavigation, Menu } from "./AccountNavigation";
 import { AccountActivationTag, AccountPicker, AccountPickerButton } from "./AccountPicker";
+import { SandboxUserPickerContents, SandboxUserTag } from "./SandboxUserPicker";
 
 const HEIGHT = 40;
 const PADDING_TOP = 12;
@@ -123,7 +128,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gray[50],
   },
   accountPicker: {
-    marginHorizontal: negativeSpacings[16],
+    marginHorizontal: negativeSpacings[24],
     height: 220,
   },
 });
@@ -133,15 +138,14 @@ type Props = {
   hasMultipleMemberships: boolean;
   activationTag: AccountActivationTag;
   entries: Menu;
-  firstName: string;
-  lastName: string;
+  user: NonNullable<AccountAreaQuery["user"]>;
   accountMembershipId: string;
-  identificationStatus: IdentificationStatus;
+  identificationStatusInfo: Option<IdentificationLevelFragment>;
   refetchAccountAreaQuery: () => void;
-  additionalInfo: AdditionalInfo;
   shouldDisplayIdVerification: boolean;
   isScrolled: boolean;
   onScrollToTop: () => void;
+  hasRequiredIdentificationLevel: boolean | undefined;
 };
 
 export const NavigationTabBar = ({
@@ -150,45 +154,33 @@ export const NavigationTabBar = ({
   activationTag,
   entries,
   accountMembershipId,
-  firstName,
-  lastName,
-  identificationStatus,
+  user,
+  identificationStatusInfo,
   shouldDisplayIdVerification,
   isScrolled,
+  hasRequiredIdentificationLevel,
   onScrollToTop,
 }: Props) => {
-  const [screen, setScreen] = useState<null | "menu" | "memberships">(null);
-  const route = Router.useRoute([...accountAreaRoutes, "AccountActivation", "AccountProfile"]);
+  const fullName = user.fullName;
+
+  const [screen, setScreen] = useState<null | "menu" | "memberships" | "sandboxUsers">(null);
+  const route = Router.useRoute(accountRoutes);
 
   const activeMenuItem =
     entries.find(item => item.matchRoutes.some(name => name === route?.name)) ?? entries[0];
 
   const signout = () => {
-    fetch(`/auth/logout`, {
-      method: "post",
-      credentials: "include",
-    })
-      .then(async response => {
-        if (response.status >= 200 && response.status < 300) {
-          window.location.replace(Router.ProjectLogin());
-        } else {
-          const message = await response.text();
-          throw new Error(message);
-        }
-      })
-      .catch((error: Error) => {
-        showToast({ variant: "error", title: translateError(error) });
-        logFrontendError(error);
+    Request.make({ url: "/auth/logout", method: "POST", withCredentials: true })
+      .mapOkToResult(badStatusToError)
+      .tapOk(() => window.location.replace(Router.ProjectLogin()))
+      .tapError(error => {
+        showToast({ variant: "error", error, title: translateError(error) });
       });
   };
 
   if (!activeMenuItem) {
     return null;
   }
-
-  const names = [firstName, lastName].filter(isNotEmpty);
-  const fullName = names.join(" ");
-  const initials = names.map(name => name[0]).join("");
 
   return (
     <View style={styles.tabBarContainer}>
@@ -218,7 +210,7 @@ export const NavigationTabBar = ({
             ))
             .with({ name: "AccountProfile" }, () => (
               <>
-                <Avatar size={22} initials={initials} />
+                <Avatar size={22} user={user} />
                 <Space width={12} />
 
                 <LakeText numberOfLines={1} variant="regular" color={colors.gray[700]}>
@@ -239,19 +231,15 @@ export const NavigationTabBar = ({
 
           <Icon name="lake-menu" size={22} style={styles.menuIcon} />
 
-          {shouldDisplayIdVerification
+          {shouldDisplayIdVerification && hasRequiredIdentificationLevel === false
             ? match({
-                identificationStatus,
+                identificationStatusInfo,
                 hasNotifications: entries.some(item => item.hasNotifications),
                 hasActivationTag: activationTag !== "none",
               })
                 .with(
                   {
-                    identificationStatus: P.union(
-                      "Uninitiated",
-                      "InvalidIdentity",
-                      "InsufficientDocumentQuality",
-                    ),
+                    identificationStatusInfo: P.union("Started", "Invalid", "Canceled", "Expired"),
                   },
                   { hasNotifications: true },
                   { hasActivationTag: true },
@@ -266,6 +254,18 @@ export const NavigationTabBar = ({
             {match(screen)
               .with("menu", () => (
                 <>
+                  {env.APP_TYPE === "SANDBOX" ? (
+                    <>
+                      <Box direction="row" justifyContent="start">
+                        <ClientContext.Provider value={partnerAdminClient}>
+                          <SandboxUserTag onPress={() => setScreen("sandboxUsers")} />
+                        </ClientContext.Provider>
+                      </Box>
+
+                      <Space height={16} />
+                    </>
+                  ) : null}
+
                   <AccountPickerButton
                     selectedAccountMembership={accountMembership}
                     desktop={false}
@@ -300,9 +300,9 @@ export const NavigationTabBar = ({
                   >
                     {({ active }) => (
                       <>
-                        <Avatar size={22} initials={initials} />
+                        <Avatar size={22} user={user} />
 
-                        {fullName && (
+                        {isNotNullish(fullName) && (
                           <>
                             <Space width={12} />
 
@@ -315,12 +315,13 @@ export const NavigationTabBar = ({
                               {fullName}
                             </LakeText>
 
-                            {shouldDisplayIdVerification
-                              ? match(identificationStatus)
+                            {shouldDisplayIdVerification && hasRequiredIdentificationLevel === false
+                              ? match(identificationStatusInfo)
                                   .with(
-                                    "Uninitiated",
-                                    "InvalidIdentity",
-                                    "InsufficientDocumentQuality",
+                                    Option.P.None,
+                                    Option.P.Some({
+                                      status: P.union("Started", "Invalid", "Canceled", "Expired"),
+                                    }),
                                     () => (
                                       <>
                                         <Fill minWidth={24} />
@@ -360,6 +361,37 @@ export const NavigationTabBar = ({
                           setScreen(null);
                         }}
                       />
+                    </View>
+
+                    <Fill minHeight={24} />
+
+                    <LakeButton
+                      mode="secondary"
+                      icon="arrow-left-filled"
+                      onPress={() => setScreen("menu")}
+                    >
+                      {t("common.back")}
+                    </LakeButton>
+                  </>
+                </TransitionView>
+              ))
+              .with("sandboxUsers", () => (
+                <TransitionView {...animations.fadeAndSlideInFromRight}>
+                  <>
+                    <LakeHeading level={2} variant="h3">
+                      {t("sandboxUser.impersonatedAs")}
+                    </LakeHeading>
+
+                    <Space height={16} />
+
+                    <View style={styles.accountPicker}>
+                      <ClientContext.Provider value={partnerAdminClient}>
+                        <SandboxUserPickerContents
+                          onEndorse={() => {
+                            window.location.replace(Router.ProjectRootRedirect());
+                          }}
+                        />
+                      </ClientContext.Provider>
                     </View>
 
                     <Fill minHeight={24} />

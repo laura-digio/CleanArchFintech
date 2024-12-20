@@ -9,17 +9,30 @@ fragment TransactionDetails on Transaction {
   counterparty
   reference
   externalReference
+  statementCanBeGenerated
   payment {
     id
     createdAt
   }
-  originTransaction @include(if: $canViewAccount) {
+  account {
+    id
+    language
+  }
+  originTransaction {
     id
     type
     executionDate
     amount {
       currency
       value
+    }
+    statusInfo {
+      __typename
+      status
+      ... on RejectedTransactionStatusInfo {
+        status
+        reason
+      }
     }
   }
   statusInfo {
@@ -51,24 +64,51 @@ fragment TransactionDetails on Transaction {
   executionDate
   updatedAt
   ... on CardTransaction {
-    maskedPan
-    merchantCity
-    merchantCountry
+    cardDetails @include(if: $canQueryCardOnTransaction) {
+      ... on CardOutDetails {
+        maskedPan
+        card {
+          id
+          name
+          accountMembership {
+            id
+            user {
+              id
+              firstName
+              preferredLastName
+              fullName
+            }
+          }
+        }
+      }
+    }
+    merchant {
+      ... on CardOutMerchant {
+        merchantId
+        merchantCity
+        merchantCountry
+      }
+    }
     originalAmount {
       currency
       value
     }
-    card @include(if: $canQueryCardOnTransaction) {
-      id
-      accountMembership {
-        id
-        user {
-          id
-          firstName
-          lastName
-        }
-      }
+    enrichedTransactionInfo {
+      enrichedMerchantName
+      isSubscription
+      carbonFootprint
+      contactEmail
+      contactPhone
+      contactWebsite
+      logoUrl
+      category
+      subcategory
+      address
+      city
+      postalCode
+      country
     }
+
     currencyExchange {
       __typename
       exchangeRate
@@ -76,19 +116,26 @@ fragment TransactionDetails on Transaction {
   }
   ... on SEPACreditTransferTransaction {
     creditor {
-      __typename
       name
       IBAN
-      ... on SEPACreditTransferInCreditor {
-        IBAN
-      }
-      ... on SEPACreditTransferOutCreditor {
-        IBAN
-        name
-      }
     }
     debtor {
       name
+      IBAN
+    }
+    beneficiary {
+      __typename
+
+      ... on TrustedBeneficiary {
+        ...TrustedBeneficiaryDetails
+      }
+      ... on UnsavedSepaBeneficiary {
+        name
+        iban
+        address {
+          ...AddressDetails
+        }
+      }
     }
   }
   ... on InternalDirectDebitTransaction {
@@ -101,10 +148,7 @@ fragment TransactionDetails on Transaction {
       accountId
     }
     mandate {
-      __typename
-      ... on InternalDirectDebitMandate {
-        id
-      }
+      id
     }
   }
   ... on FeeTransaction {
@@ -118,7 +162,6 @@ fragment TransactionDetails on Transaction {
       statusInfo {
         status
         ... on RejectedTransactionStatusInfo {
-          __typename
           reason
         }
       }
@@ -133,49 +176,56 @@ fragment TransactionDetails on Transaction {
     }
   }
   ... on SEPADirectDebitTransaction {
-    reservedAmount {
-      currency
-      value
-    }
-    reservedAmountReleasedAt
     __typename
+    reservedAmountReleasedAt
+
     creditor {
       name
+      IBAN
+    }
+    debtor {
+      name
+      IBAN
+    }
+    reservedAmount {
+      value
+      currency
     }
     mandate {
-      __typename
+      id
       ... on SEPAReceivedDirectDebitMandate {
-        id
         ultimateCreditorName
       }
       ... on SEPAPaymentDirectDebitMandate {
-        id
         debtor {
           name
         }
       }
     }
-    ... on SEPADirectDebitTransaction {
-      creditor {
+  }
+  ... on InternationalCreditTransferTransaction {
+    creditor {
+      ... on InternationalCreditTransferInCreditor {
         name
       }
-      mandate {
-        __typename
-        ... on SEPAReceivedDirectDebitMandate {
-          id
-          ultimateCreditorName
-        }
-        ... on SEPAPaymentDirectDebitMandate {
-          id
-          debtor {
-            name
-          }
+      ... on InternationalCreditTransferOutCreditor {
+        name
+        details {
+          key
+          value
         }
       }
     }
-  }
-  ... on InternationalCreditTransferTransaction {
+    reference
+    paymentProduct
+    statusInfo {
+      status
+      ... on RejectedTransactionStatusInfo {
+        reason
+      }
+    }
     internationalCurrencyExchange: currencyExchange {
+      exchangeRate
       __typename
       sourceAmount {
         currency
@@ -183,6 +233,15 @@ fragment TransactionDetails on Transaction {
       }
       targetAmount {
         currency
+        value
+      }
+    }
+    beneficiary {
+      name
+      currency
+      route
+      details {
+        key
         value
       }
     }
@@ -221,6 +280,7 @@ fragment AccountHolderForCardSettings on AccountHolder {
   info {
     __typename
     name
+    type
   }
 }
 
@@ -237,11 +297,158 @@ query AuthStatus {
   }
 }
 
+fragment IdentificationLevelFragment on IdentificationLevelStatusInfo {
+  ... on NotSupportedIdentificationLevelStatusInfo {
+    status
+  }
+  ... on StartedIdentificationLevelStatusInfo {
+    status
+  }
+  ... on PendingIdentificationLevelStatusInfo {
+    status
+  }
+  ... on ValidIdentificationLevelStatusInfo {
+    status
+  }
+  ... on InvalidIdentificationLevelStatusInfo {
+    reasons
+    status
+  }
+  ... on CanceledIdentificationLevelStatusInfo {
+    status
+  }
+  ... on ExpiredIdentificationLevelStatusInfo {
+    status
+    expiredAt
+  }
+}
+
+fragment Identification on Identification {
+  id
+  levels {
+    expert {
+      ...IdentificationLevelFragment
+    }
+    pvid {
+      ...IdentificationLevelFragment
+    }
+    qes {
+      ...IdentificationLevelFragment
+    }
+  }
+  process
+}
+
+fragment TrustedBeneficiaryDetails on TrustedBeneficiary {
+  __typename
+  id
+  label
+  name
+  type
+  createdAt
+  statusInfo {
+    status
+  }
+  ... on TrustedInternalBeneficiary {
+    accountId
+  }
+  ... on TrustedInternationalBeneficiary {
+    currency
+    route
+    details {
+      key
+      value
+    }
+  }
+  ... on TrustedSepaBeneficiary {
+    iban
+    address {
+      ...AddressDetails
+    }
+  }
+}
+
+# Queries
+
+query LastRelevantIdentification(
+  $accountMembershipId: ID!
+  $identificationProcess: [IdentificationProcess!]
+) {
+  accountMembership(id: $accountMembershipId) {
+    id
+    user {
+      id
+      identifications(
+        first: 1
+        orderBy: { field: updatedAt, direction: Desc }
+        filters: { processes: $identificationProcess }
+      ) {
+        edges {
+          node {
+            ...Identification
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment AccountMembershipPermissions on AccountMembership {
+  id
+  canViewAccount
+  canManageBeneficiaries
+  canInitiatePayments
+  canManageAccountMembership
+  canManageCards
+  legalRepresentative
+  statusInfo {
+    status
+  }
+  allCards: cards(filters: { statuses: [Enabled, Processing, Canceling, Canceled] }) {
+    totalCount
+  }
+  account {
+    id
+    statusInfo {
+      status
+    }
+    paymentLevel
+    merchantProfiles(first: 0) {
+      totalCount
+    }
+  }
+}
+
+fragment WebBankingSettings on WebBankingSettings {
+  canViewAccountStatement
+  canViewAccountDetails
+  canAddNewMembers
+  canViewMembers
+  canViewPaymentList
+  canOrderPhysicalCards
+  canInitiatePaymentsToNewBeneficiaries
+  canOrderVirtualCards
+  canManageVirtualIbans
+  canCreateMerchantProfile
+  canRequestOnlineCardsPaymentMethod
+  canRequestSepaDirectDebitCorePaymentMethod
+  canRequestSepaDirectDebitB2BPaymentMethod
+  canRequestInternalDirectDebitCorePaymentMethod
+  canRequestInternalDirectDebitB2BPaymentMethod
+  canRequestChecksPaymentMethod
+  canInitiateCheckMerchantPayments
+  canCreateMerchantPaymentLinks
+}
+
 query AccountArea($accountMembershipId: ID!) {
   accountMembership(id: $accountMembershipId) {
     id
+    ...AccountMembershipPermissions
     ...AccountMembership
     account {
+      statusInfo {
+        status
+      }
       IBAN
       bankDetails
       language
@@ -253,6 +460,9 @@ query AccountArea($accountMembershipId: ID!) {
       }
       holder {
         id
+        info {
+          type
+        }
         supportingDocumentCollections(first: 1) {
           edges {
             node {
@@ -289,15 +499,7 @@ query AccountArea($accountMembershipId: ID!) {
     logoUri
     B2BMembershipIDVerification
     webBankingSettings {
-      accountStatementsVisible: canViewAccountStatement
-      accountVisible: canViewAccountDetails
-      memberCreationVisible: canAddNewMembers
-      memberListVisible: canViewMembers
-      paymentListVisible: canViewPaymentList
-      physicalCardOrderVisible: canOrderPhysicalCards
-      transferCreationVisible: canInitiatePaymentsToNewBeneficiaries
-      virtualCardOrderVisible: canOrderVirtualCards
-      virtualIbansVisible: canManageVirtualIbans
+      ...WebBankingSettings
     }
     supportingDocumentSettings {
       collectMode
@@ -306,10 +508,9 @@ query AccountArea($accountMembershipId: ID!) {
   user {
     id
     firstName
-    lastName
+    preferredLastName
+    fullName
     mobilePhoneNumber
-    idVerified
-    identificationStatus
     identificationLevels {
       ...IdentificationLevelsFragment
     }
@@ -348,7 +549,6 @@ query AccountDetailsIbanPage($accountId: ID!) {
 query AccountDetailsVirtualIbansPage($accountId: ID!, $first: Int!, $after: String) {
   account(accountId: $accountId) {
     id
-    paymentLevel
     virtualIbanEntries(first: $first, after: $after) {
       totalCount
       pageInfo {
@@ -399,6 +599,7 @@ query AccountDetailsBillingPage($accountId: ID!, $first: Int!, $after: String) {
           openingDate
           closingDate
           id
+          type
           name
           createdAt
           updatedAt
@@ -419,21 +620,33 @@ query AccountDetailsBillingPage($accountId: ID!, $first: Int!, $after: String) {
   }
 }
 
-query AccountDetailsSettingsPage($accountId: ID!) {
+query AccountDetailsSettingsPage(
+  $accountId: ID!
+  $filters: LegalDocumentsFilterInput
+  $language: String!
+) {
   account(accountId: $accountId) {
     id
     country
     language
     name
+    legalDocuments(first: 1, filters: $filters) {
+      edges {
+        node {
+          id
+          type
+          url
+          statusInfo {
+            status
+          }
+        }
+      }
+    }
     statusInfo {
       status
     }
     holder {
       id
-      onboarding {
-        id
-        tcuUrl
-      }
       info {
         __typename
         ... on AccountHolderCompanyInfo {
@@ -449,6 +662,11 @@ query AccountDetailsSettingsPage($accountId: ID!) {
         country
       }
     }
+  }
+  projectInfo {
+    id
+    tcuDocumentUri(language: $language)
+    name
   }
 }
 
@@ -481,31 +699,6 @@ mutation UpdateAccount(
     ... on UpdateAccountHolderSuccessPayload {
       accountHolder {
         id
-      }
-    }
-  }
-}
-
-query AccountsListPage($first: Int!, $after: String) {
-  accounts(first: $first, after: $after) {
-    pageInfo {
-      endCursor
-      hasNextPage
-    }
-    edges {
-      node {
-        id
-        number
-        name
-        balances {
-          ...AccountBalances
-        }
-        holder {
-          id
-          info {
-            name
-          }
-        }
       }
     }
   }
@@ -591,6 +784,11 @@ fragment CardListItem on Card {
       value
     }
   }
+  physicalCard {
+    statusInfo {
+      status
+    }
+  }
   cardDesignUrl
   accountMembership {
     id
@@ -622,7 +820,8 @@ fragment CardListItem on Card {
     user {
       id
       firstName
-      lastName
+      preferredLastName
+      fullName
     }
   }
 }
@@ -641,7 +840,7 @@ fragment CardListPageData on CardConnection {
   }
 }
 
-query CardListPageWithAccount($filters: CardFiltersInput, $first: Int!, $after: String) {
+query CardListPage($filters: CardFiltersInput, $first: Int!, $after: String) {
   cards(
     filters: $filters
     orderBy: { field: createdAt, direction: Desc }
@@ -652,7 +851,7 @@ query CardListPageWithAccount($filters: CardFiltersInput, $first: Int!, $after: 
   }
 }
 
-query CardListPageWithoutAccount(
+query AccountMembershipCardListPage(
   $accountMembershipId: ID!
   $filters: CardFiltersInput
   $first: Int!
@@ -672,7 +871,7 @@ query CardListPageWithoutAccount(
   }
 }
 
-query CardCountWithAccount($filters: CardFiltersInput, $first: Int!) {
+query CardCount($filters: CardFiltersInput, $first: Int!) {
   cards(filters: $filters, orderBy: { field: createdAt, direction: Desc }, first: $first) {
     totalCount
     edges {
@@ -684,27 +883,13 @@ query CardCountWithAccount($filters: CardFiltersInput, $first: Int!) {
   }
 }
 
-query CardCountWithoutAccount($accountMembershipId: ID!, $filters: CardFiltersInput, $first: Int!) {
-  accountMembership(id: $accountMembershipId) {
-    id
-    cards(filters: $filters, orderBy: { field: createdAt, direction: Desc }, first: $first) {
-      totalCount
-      edges {
-        cursor
-        node {
-          id
-        }
-      }
-    }
-  }
-}
-
 fragment DigitalCard on DigitalCard {
   __typename
   id
   createdAt
   updatedAt
   walletProvider {
+    id
     name
   }
   ... on CompleteDigitalCard {
@@ -732,6 +917,7 @@ query CardPage($cardId: ID!) {
     withdrawal
     nonMainCurrencyTransactions
     international
+    issuingCountry
     statusInfo {
       status
     }
@@ -742,9 +928,11 @@ query CardPage($cardId: ID!) {
       id
       canManageAccountMembership
       recommendedIdentificationLevel
+      hasRequiredIdentificationLevel
       canViewAccount
       canManageBeneficiaries
       canInitiatePayments
+      canManageCards
       statusInfo {
         __typename
         status
@@ -753,6 +941,7 @@ query CardPage($cardId: ID!) {
           firstNameMatchError
           lastNameMatchError
           phoneNumberMatchError
+          emailVerifiedMatchError
           birthDateMatchError
           restrictedTo {
             firstName
@@ -769,13 +958,14 @@ query CardPage($cardId: ID!) {
       user {
         id
         firstName
-        lastName
-        identificationStatus
+        preferredLastName
+        fullName
         identificationLevels {
           expert
           QES
           PVID
         }
+        verifiedEmails
       }
       account {
         id
@@ -824,7 +1014,7 @@ query CardPage($cardId: ID!) {
     physicalCard {
       expiryDate
       cardMaskedNumber
-
+      identifier
       statusInfo {
         __typename
         status
@@ -852,6 +1042,27 @@ query CardPage($cardId: ID!) {
             consentUrl
           }
         }
+        ... on PhysicalCardToRenewStatusInfo {
+          address {
+            addressLine1
+            addressLine2
+            city
+            postalCode
+            country
+          }
+        }
+      }
+      previousPhysicalCards {
+        cardMaskedNumber
+        customOptions {
+          additionalPrintedLine
+        }
+        expiryDate
+        offlineSpendingLimit {
+          currency
+          value
+        }
+        isExpired
       }
     }
   }
@@ -861,7 +1072,6 @@ query CardTransactionsPage(
   $cardId: ID!
   $first: Int!
   $canQueryCardOnTransaction: Boolean!
-  $canViewAccount: Boolean!
   $after: String
   $filters: TransactionsFiltersInput
 ) {
@@ -892,7 +1102,8 @@ query CardTransactionsPage(
       user {
         id
         firstName
-        lastName
+        preferredLastName
+        fullName
       }
     }
     transactions(first: $first, after: $after, filters: $filters) {
@@ -905,105 +1116,6 @@ query CardTransactionsPage(
         node {
           ...TransactionDetails
         }
-      }
-    }
-  }
-}
-
-query CardSettingsPage($cardId: ID!) {
-  card(cardId: $cardId) {
-    id
-    cardMaskedNumber
-    physicalCard {
-      identifier
-    }
-    statusInfo {
-      status
-    }
-    accountMembership {
-      id
-      account {
-        id
-        number
-        holder {
-          id
-          info {
-            name
-          }
-        }
-      }
-      user {
-        id
-        firstName
-        lastName
-      }
-    }
-    spendingLimits {
-      amount {
-        currency
-        value
-      }
-      period
-      type
-    }
-    mainCurrency
-    eCommerce
-    withdrawal
-    nonMainCurrencyTransactions
-    international
-  }
-}
-
-query OrderPhysicalCardPage($cardId: ID!) {
-  card(cardId: $cardId) {
-    id
-    accountMembership {
-      id
-      account {
-        id
-        number
-        holder {
-          id
-          info {
-            name
-            type
-          }
-          residencyAddress {
-            addressLine1
-            addressLine2
-            city
-            postalCode
-            state
-            country
-          }
-        }
-      }
-      statusInfo {
-        __typename
-        status
-        ... on AccountMembershipInvitationSentStatusInfo {
-          restrictedTo {
-            firstName
-            lastName
-          }
-        }
-        ... on AccountMembershipBindingUserErrorStatusInfo {
-          restrictedTo {
-            firstName
-            lastName
-          }
-        }
-        ... on AccountMembershipConsentPendingStatusInfo {
-          restrictedTo {
-            firstName
-            lastName
-          }
-        }
-      }
-      user {
-        id
-        firstName
-        lastName
       }
     }
   }
@@ -1035,123 +1147,10 @@ query ConsentCallbackPage($consentId: ID!) {
   }
 }
 
-query EditMemberPage($id: ID!) {
-  accountMembership(id: $id) {
-    id
-    email
-    legalRepresentative
-    account {
-      id
-      country
-      statusInfo {
-        status
-      }
-    }
-    statusInfo {
-      __typename
-      status
-      ... on AccountMembershipBindingUserErrorStatusInfo {
-        restrictedTo {
-          birthDate
-          firstName
-          lastName
-          phoneNumber
-        }
-        idVerifiedMatchError
-      }
-      ... on AccountMembershipInvitationSentStatusInfo {
-        restrictedTo {
-          birthDate
-          firstName
-          lastName
-          phoneNumber
-        }
-      }
-    }
-    canInitiatePayments
-    canManageAccountMembership
-    canManageBeneficiaries
-    canViewAccount
-    user {
-      id
-      birthDate
-      firstName
-      lastName
-      mobilePhoneNumber
-    }
-    cards(filters: { statuses: Enabled }) {
-      edges {
-        node {
-          id
-          statusInfo {
-            __typename
-          }
-        }
-      }
-      totalCount
-    }
-    residencyAddress {
-      addressLine1
-      addressLine2
-      city
-      postalCode
-      state
-      country
-    }
-    taxIdentificationNumber
-  }
-}
-
-query NewStandingOrderPage($accountId: ID!) {
-  account(accountId: $accountId) {
-    IBAN
-    currency
-    name
-    id
-    number
-    balances {
-      ...AccountBalances
-    }
-  }
-}
-
-query EditStandingOrderPage($id: ID!) {
-  standingOrder(standingOrderId: $id) {
-    id
-    label
-    period
-    reference
-    statusInfo {
-      status
-    }
-    sepaBeneficiary {
-      id
-      name
-    }
-    targetAvailableBalance {
-      currency
-      value
-    }
-    amount {
-      currency
-      value
-    }
-    lastExecutionDate
-    firstExecutionDate
-    nextExecutionDate
-    createdBy {
-      id
-      firstName
-      lastName
-    }
-  }
-}
-
 query StandingOrdersHistoryPage(
   $standingOrderId: ID!
   $first: Int!
   $canQueryCardOnTransaction: Boolean!
-  $canViewAccount: Boolean!
   $after: String
   $filters: PaymentFiltersInput
   $orderBy: PaymentOrderByInput
@@ -1172,8 +1171,9 @@ query StandingOrdersHistoryPage(
     amount {
       value
     }
+    # id is deprecated here
+    # eslint-disable-next-line @graphql-eslint/require-id-when-available
     sepaBeneficiary {
-      id
       name
     }
     payments(first: $first, after: $after, filters: $filters, orderBy: $orderBy) {
@@ -1196,48 +1196,6 @@ query StandingOrdersHistoryPage(
             }
             totalCount
           }
-        }
-      }
-    }
-  }
-}
-
-query StandingOrdersPage($accountId: ID!) {
-  account(accountId: $accountId) {
-    id
-    number
-    name
-    holder {
-      id
-      info {
-        name
-      }
-    }
-
-    standingOrders {
-      totalCount
-      edges {
-        node {
-          id
-          period
-          reference
-          label
-          sepaBeneficiary {
-            id
-            name
-          }
-          targetAvailableBalance {
-            value
-          }
-          statusInfo {
-            status
-          }
-          amount {
-            value
-          }
-          lastExecutionDate
-          nextExecutionDate
-          firstExecutionDate
         }
       }
     }
@@ -1267,8 +1225,9 @@ query getStandingOrders(
           statusInfo {
             status
           }
+          # id is deprecated here
+          # eslint-disable-next-line @graphql-eslint/require-id-when-available
           sepaBeneficiary {
-            id
             name
           }
           targetAvailableBalance {
@@ -1285,7 +1244,8 @@ query getStandingOrders(
           createdBy {
             id
             firstName
-            lastName
+            preferredLastName
+            fullName
           }
         }
       }
@@ -1296,11 +1256,15 @@ query getStandingOrders(
 fragment AccountMembership on AccountMembership {
   __typename
   id
+  accountId
+  accountCountry
   createdAt
   updatedAt
   email
   legalRepresentative
   recommendedIdentificationLevel
+  hasRequiredIdentificationLevel
+  language
   statusInfo {
     __typename
     status
@@ -1311,6 +1275,7 @@ fragment AccountMembership on AccountMembership {
         lastName
         phoneNumber
       }
+      emailVerifiedMatchError
       idVerifiedMatchError
     }
     ... on AccountMembershipInvitationSentStatusInfo {
@@ -1339,8 +1304,11 @@ fragment AccountMembership on AccountMembership {
     birthDate
     firstName
     lastName
+    birthLastName
+    preferredLastName
+    fullName
     mobilePhoneNumber
-    idVerified
+    verifiedEmails
   }
   account {
     id
@@ -1354,12 +1322,13 @@ fragment AccountMembership on AccountMembership {
   activeCards: cards(filters: { statuses: [Enabled, Processing] }) {
     totalCount
   }
-  allCards: cards(filters: { statuses: [Enabled, Processing, Canceling, Canceled] }) {
-    totalCount
-  }
 }
 
 query MembershipDetail($accountMembershipId: ID!) {
+  projectInfo {
+    id
+    B2BMembershipIDVerification
+  }
   accountMembership(id: $accountMembershipId) {
     ...AccountMembership
   }
@@ -1403,6 +1372,7 @@ query MembersPage(
         search: $search
       }
     ) {
+      totalCount
       pageInfo {
         endCursor
         hasNextPage
@@ -1417,38 +1387,6 @@ query MembersPage(
   }
 }
 
-query NewPaymentWizard($first: Int!, $after: String) {
-  user {
-    id
-    accountMemberships(first: $first, after: $after, filters: { canInitiatePayments: true }) {
-      edges {
-        node {
-          id
-          account {
-            id
-            number
-            name
-            balances {
-              ...AccountBalances
-            }
-            holder {
-              id
-              info {
-                name
-              }
-            }
-          }
-        }
-        cursor
-      }
-      pageInfo {
-        endCursor
-        hasNextPage
-      }
-    }
-  }
-}
-
 query ProfilePage {
   projectInfo {
     id
@@ -1457,10 +1395,9 @@ query ProfilePage {
   user {
     id
     firstName
-    lastName
+    preferredLastName
+    fullName
     mobilePhoneNumber
-    idVerified
-    identificationStatus
     birthDate
   }
 }
@@ -1503,16 +1440,13 @@ query AccountActivationPage($accountMembershipId: ID!) {
                   __typename
 
                   ... on SupportingDocumentRefusedStatusInfo {
-                    downloadUrl
                     filename
                     reason
                   }
                   ... on SupportingDocumentUploadedStatusInfo {
-                    downloadUrl
                     filename
                   }
                   ... on SupportingDocumentValidatedStatusInfo {
-                    downloadUrl
                     filename
                   }
                 }
@@ -1531,14 +1465,9 @@ query AccountActivationPage($accountMembershipId: ID!) {
     }
     user {
       id
-      identificationStatus
-      identificationLevels {
-        expert
-        QES
-        PVID
-      }
       firstName
-      lastName
+      preferredLastName
+      fullName
       birthDate
       mobilePhoneNumber
     }
@@ -1599,7 +1528,6 @@ query TransactionListPage(
   $accountId: ID!
   $first: Int!
   $canQueryCardOnTransaction: Boolean!
-  $canViewAccount: Boolean!
   $after: String
   $filters: TransactionsFiltersInput
   $orderBy: TransactionsOrderByInput
@@ -1626,11 +1554,155 @@ query TransactionListPage(
   }
 }
 
+fragment TransactionStatement on TransactionStatement {
+  id
+  statusInfo {
+    status
+    ... on GeneratedTransactionStatementStatusInfo {
+      url
+    }
+  }
+}
+
+mutation GenerateTransactionStatement($input: GenerateTransactionStatementInput!) {
+  generateTransactionStatement(input: $input) {
+    ... on GenerateTransactionStatementSuccessPayload {
+      transactionStatement {
+        ...TransactionStatement
+      }
+    }
+  }
+}
+
+query TransactionStatement($id: ID!) {
+  transactionStatement(id: $id) {
+    ...TransactionStatement
+  }
+}
+
+query BeneficiariesList(
+  $accountId: ID!
+  $first: Int!
+  $after: String
+  $filters: TrustedBeneficiaryFiltersInput
+) {
+  account(accountId: $accountId) {
+    id
+    trustedBeneficiaries(
+      first: $first
+      after: $after
+      orderBy: { field: createdAt, direction: Desc }
+      filters: $filters
+    ) {
+      totalCount
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      edges {
+        cursor
+        node {
+          ...TrustedBeneficiaryDetails
+        }
+      }
+    }
+  }
+}
+
+query TrustedBeneficiaryDetails($id: String!) {
+  trustedBeneficiary(id: $id) {
+    ...TrustedBeneficiaryDetails
+  }
+}
+
+query TrustedBeneficiaryTransfers(
+  $id: String!
+  $first: Int!
+  $canQueryCardOnTransaction: Boolean!
+  $after: String
+  $filters: TransactionsFiltersInput
+) {
+  trustedBeneficiary(id: $id) {
+    id
+    transactions(first: $first, after: $after, filters: $filters) {
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      totalCount
+      edges {
+        node {
+          ...TransactionDetails
+        }
+      }
+    }
+  }
+}
+
+mutation AddSepaBeneficiary($input: AddTrustedSepaBeneficiaryInput!) {
+  addTrustedSepaBeneficiary(input: $input) {
+    __typename
+
+    ... on AddTrustedSepaBeneficiarySuccessPayload {
+      trustedBeneficiary {
+        id
+        statusInfo {
+          __typename
+
+          ... on TrustedBeneficiaryConsentPendingStatusInfo {
+            consent {
+              id
+              consentUrl
+            }
+          }
+        }
+      }
+    }
+    ... on ValidationRejection {
+      fields {
+        path
+      }
+    }
+  }
+}
+
+mutation AddInternationalBeneficiary($input: AddTrustedInternationalBeneficiaryInput!) {
+  addTrustedInternationalBeneficiary(input: $input) {
+    __typename
+
+    ... on AddTrustedInternationalBeneficiarySuccessPayload {
+      trustedBeneficiary {
+        id
+        statusInfo {
+          __typename
+
+          ... on TrustedBeneficiaryConsentPendingStatusInfo {
+            consent {
+              id
+              consentUrl
+            }
+          }
+        }
+      }
+    }
+    ... on ValidationRejection {
+      fields {
+        path
+      }
+    }
+  }
+}
+
+query Transaction($id: ID!, $canQueryCardOnTransaction: Boolean!) {
+  transaction(id: $id) {
+    ...TransactionDetails
+  }
+}
+
 query UpcomingTransactionListPage(
   $accountId: ID!
   $first: Int!
   $canQueryCardOnTransaction: Boolean!
-  $canViewAccount: Boolean!
   $after: String
 ) {
   account(accountId: $accountId) {
@@ -1722,24 +1794,6 @@ query GetFirstAccountMembership($filters: AccountMembershipsFilterInput!) {
   }
 }
 
-query GetAccount($accountId: ID!) {
-  account(accountId: $accountId) {
-    id
-    number
-    name
-    IBAN
-    balances {
-      ...AccountBalances
-    }
-    holder {
-      id
-      info {
-        name
-      }
-    }
-  }
-}
-
 # Components queries
 
 fragment AddressInfo on AddressInfo {
@@ -1752,7 +1806,7 @@ fragment AddressInfo on AddressInfo {
   state
 }
 
-query GetCardProducts($accountMembershipId: ID!) {
+query GetCardProducts($accountMembershipId: ID!, $after: String, $first: Int!, $search: String) {
   accountMembership(id: $accountMembershipId) {
     id
     account {
@@ -1772,11 +1826,35 @@ query GetCardProducts($accountMembershipId: ID!) {
           ...AddressInfo
         }
       }
+      allMemberships: memberships(
+        filters: { status: [Enabled, InvitationSent, BindingUserError] }
+      ) {
+        totalCount
+      }
+      memberships(
+        after: $after
+        first: $first
+        filters: { search: $search, status: [Enabled, InvitationSent, BindingUserError] }
+      ) {
+        totalCount
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+        edges {
+          cursor
+          node {
+            id
+            ...AccountMembership
+          }
+        }
+      }
     }
     user {
       id
       firstName
-      lastName
+      preferredLastName
+      fullName
       mobilePhoneNumber
     }
   }
@@ -1867,11 +1945,7 @@ query GetEligibleCardMemberships($accountId: ID!, $after: String, $first: Int!, 
   }
 }
 
-query GetTransactionDetails(
-  $transactionId: ID!
-  $canQueryCardOnTransaction: Boolean!
-  $canViewAccount: Boolean!
-) {
+query GetTransactionDetails($transactionId: ID!, $canQueryCardOnTransaction: Boolean!) {
   transaction(id: $transactionId) {
     ...TransactionDetails
   }
@@ -1947,6 +2021,22 @@ query getIbanValidation($iban: IBAN!) {
   }
 }
 
+query GetBeneficiaryVerification($input: BeneficiaryVerificationInput!) {
+  beneficiaryVerification(input: $input) {
+    __typename
+    ... on BeneficiaryTypo {
+      nameSuggestion
+    }
+    ... on BeneficiaryMismatch {
+      nameSuggestion
+      accountStatus
+    }
+    ... on InvalidBeneficiaryVerification {
+      message
+    }
+  }
+}
+
 query GetAvailableAccountBalance($accountMembershipId: ID!) {
   accountMembership(id: $accountMembershipId) {
     id
@@ -1996,52 +2086,42 @@ query GetInternationalBeneficiaryDynamicForms(
     dynamicFields: $dynamicFields
   ) {
     schemes {
-      type
       title
+      type
       remainingFieldsToRefreshCount
+
       fields {
+        __typename
+
+        required
         key
         name
-        required
+
         ... on DateField {
           example
           validationRegex
-          key
-          name
-          required
+        }
+        ... on RadioField {
+          refreshDynamicFieldsOnChange
+          allowedValues {
+            key
+            name
+          }
+        }
+        ... on SelectField {
+          refreshDynamicFieldsOnChange
+          allowedValues {
+            key
+            name
+          }
         }
         ... on TextField {
           displayFormat
           example
-          validationRegex
-          required
-          refreshDynamicFieldsOnChange
-          name
           minLength
           maxLength
-          key
-        }
-        ... on SelectField {
-          __typename
-          required
           refreshDynamicFieldsOnChange
-          name
-          key
-          allowedValues {
-            name
-            key
-          }
-        }
-        ... on RadioField {
-          __typename
-          required
-          refreshDynamicFieldsOnChange
-          name
-          key
-          allowedValues {
-            name
-            key
-          }
+          validationRegex
         }
       }
     }
@@ -2117,7 +2197,178 @@ query GetInternationalCreditTransferTransactionDetailsDynamicForm(
   }
 }
 
+query MerchantRoot($accountId: ID!) {
+  account(accountId: $accountId) {
+    id
+    merchantProfiles(
+      first: 1
+      orderBy: { field: createdAt, direction: Desc }
+      filters: { status: [PendingReview, Enabled] }
+    ) {
+      totalCount
+      edges {
+        node {
+          id
+        }
+      }
+    }
+  }
+}
+
+query MerchantProfile($merchantProfileId: ID!) {
+  merchantProfile(id: $merchantProfileId) {
+    ...MerchantProfile
+  }
+}
+
+query MerchantProfiles(
+  $accountId: ID!
+  $filters: MerchantProfileFiltersInput!
+  $first: Int!
+  $after: String
+) {
+  account(accountId: $accountId) {
+    id
+    merchantProfiles(filters: $filters, first: $first, after: $after) {
+      totalCount
+      edges {
+        cursor
+        node {
+          ...MerchantProfile
+        }
+      }
+      pageInfo {
+        hasNextPage
+        hasPreviousPage
+        startCursor
+        endCursor
+      }
+    }
+  }
+}
+fragment PaymentLink on MerchantPaymentLink {
+  id
+  label
+  url
+  reference
+  externalReference
+  statusInfo {
+    status
+  }
+  amount {
+    currency
+    value
+  }
+}
+
+fragment PaymentLinkConnection on MerchantPaymentLinkConnection {
+  pageInfo {
+    endCursor
+    hasNextPage
+  }
+  totalCount
+  edges {
+    node {
+      ...PaymentLink
+    }
+  }
+}
+
+query MerchantPaymentLinks(
+  $merchantProfileId: ID!
+  $filters: MerchantPaymentLinkFiltersInput!
+  $first: Int!
+  $after: String
+) {
+  merchantProfile(id: $merchantProfileId) {
+    id
+    merchantPaymentMethods {
+      id
+      type
+      updatedAt
+      statusInfo {
+        status
+      }
+    }
+    accentColor
+    merchantName
+    merchantLogoUrl
+    merchantPaymentLinks(filters: $filters, first: $first, after: $after) {
+      ...PaymentLinkConnection
+    }
+  }
+}
+
+query MerchantPaymentLink($paymentLinkId: ID!) {
+  merchantPaymentLink(id: $paymentLinkId) {
+    ...PaymentLink
+  }
+}
+
+query AccountClosing($accountId: ID!, $after: String, $first: Int!) {
+  projectInfo {
+    id
+    accentColor
+    webBankingSettings {
+      ...WebBankingSettings
+    }
+  }
+  account(accountId: $accountId) {
+    id
+    country
+    statusInfo {
+      status
+    }
+    legalRepresentativeMembership {
+      id
+      email
+      user {
+        id
+        firstName
+        preferredLastName
+        fullName
+      }
+      ...AccountMembershipPermissions
+    }
+    balances {
+      available {
+        value
+        currency
+      }
+    }
+  }
+  user {
+    id
+    accountMemberships(first: $first, after: $after) {
+      edges {
+        node {
+          id
+          accountId
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+
 # Mutations
+
+mutation CreatePaymentLink($input: CreateMerchantPaymentLinkInput!) {
+  createMerchantPaymentLink(input: $input) {
+    __typename
+    ... on CreateMerchantPaymentLinkSuccessPayload {
+      merchantPaymentLink {
+        ...PaymentLink
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
 
 mutation CreateMultiConsent($input: CreateMultiConsentInput!) {
   createMultiConsent(input: $input) {
@@ -2227,6 +2478,7 @@ mutation InitiateSepaCreditTransfers($input: InitiateCreditTransfersInput!) {
   initiateCreditTransfers(input: $input) {
     __typename
     ... on AccountNotFoundRejection {
+      id
       message
     }
     ... on ForbiddenRejection {
@@ -2252,41 +2504,12 @@ mutation InitiateSepaCreditTransfers($input: InitiateCreditTransfersInput!) {
   }
 }
 
-mutation AddCardMembership($accountMembershipId: ID!, $consentRedirectUrl: String!) {
-  addCard(
-    input: {
-      accountMembershipId: $accountMembershipId
-      withdrawal: true
-      international: true
-      nonMainCurrencyTransactions: true
-      eCommerce: true
-      consentRedirectUrl: $consentRedirectUrl
-      cardContractExpiryDate: null
-    }
-  ) {
-    __typename
-    ... on AddCardSuccessPayload {
-      card {
-        id
-        statusInfo {
-          __typename
-          ... on CardConsentPendingStatusInfo {
-            consent {
-              id
-              consentUrl
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
 mutation ResumeAccountMembership($input: ResumeAccountMembershipInput!) {
   resumeAccountMembership(input: $input) {
     __typename
     ... on ResumeAccountMembershipSuccessPayload {
       consent {
+        id
         consentUrl
       }
     }
@@ -2427,6 +2650,20 @@ mutation UpdateCard($input: UpdateCardInput!) {
   }
 }
 
+mutation ConfirmPhysicalCardRenewal($input: ConfirmPhysicalCardRenewalInput!) {
+  confirmPhysicalCardRenewal(input: $input) {
+    __typename
+    ... on ConfirmPhysicalCardRenewalSuccessPayload {
+      physicalCard {
+        identifier
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
 mutation ScheduleStandingOrder($input: ScheduleStandingOrderInput!) {
   scheduleStandingOrder(input: $input) {
     __typename
@@ -2490,6 +2727,7 @@ mutation AddAccountMembership($input: AddAccountMembershipInput!) {
           status
           ... on AccountMembershipConsentPendingStatusInfo {
             consent {
+              id
               consentUrl
             }
           }
@@ -2502,7 +2740,8 @@ mutation AddAccountMembership($input: AddAccountMembershipInput!) {
           id
           birthDate
           firstName
-          lastName
+          preferredLastName
+          fullName
           mobilePhoneNumber
         }
         account {
@@ -2541,6 +2780,173 @@ mutation InitiateInternationalCreditTransfer($input: InitiateInternationalCredit
           }
         }
       }
+    }
+  }
+}
+
+fragment MerchantPaymentMethod on MerchantPaymentMethod {
+  __typename
+  id
+  type
+  methodId
+  updatedAt
+  version
+  rollingReserve {
+    percentage
+    rollingDays
+  }
+  statusInfo {
+    __typename
+    status
+  }
+  ... on SepaDirectDebitB2BMerchantPaymentMethod {
+    sepaCreditorIdentifier
+    useSwanSepaCreditorIdentifier
+  }
+  ... on SepaDirectDebitCoreMerchantPaymentMethod {
+    sepaCreditorIdentifier
+    useSwanSepaCreditorIdentifier
+  }
+}
+
+fragment MerchantProfile on MerchantProfile {
+  id
+  accentColor
+  accountId
+  createdAt
+  updatedAt
+  expectedAverageBasket {
+    value
+    currency
+  }
+  expectedMonthlyPaymentVolume {
+    value
+    currency
+  }
+  merchantLogoUrl
+  merchantName
+  merchantWebsite
+  productType
+  statusInfo {
+    status
+  }
+  merchantPaymentMethods {
+    ...MerchantPaymentMethod
+  }
+  requestMerchantProfileUpdate {
+    id
+    status
+    merchantName
+    merchantWebsite
+    merchantLogoUrl
+    productType
+    expectedMonthlyPaymentVolume {
+      value
+      currency
+    }
+    expectedAverageBasket {
+      value
+      currency
+    }
+  }
+}
+
+mutation AddMerchantProfile($input: AddMerchantProfileInput!) {
+  addMerchantProfile(input: $input) {
+    ... on AddMerchantProfileSuccessPayload {
+      merchantProfile {
+        ...MerchantProfile
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
+mutation RequestMerchantPaymentMethods($input: RequestMerchantPaymentMethodsInput!) {
+  requestMerchantPaymentMethods(input: $input) {
+    __typename
+    ... on RequestMerchantPaymentMethodsSuccessPayload {
+      merchantProfile {
+        id
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
+mutation RequestMerchantPaymentMethodsUpdate($input: RequestMerchantPaymentMethodsUpdateInput!) {
+  requestMerchantPaymentMethodsUpdate(input: $input) {
+    __typename
+    ... on RequestMerchantPaymentMethodsUpdateSuccessPayload {
+      paymentMethodId
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
+mutation RequestMerchantProfileUpdate($input: RequestMerchantProfileUpdateInput!) {
+  requestMerchantProfileUpdate(input: $input) {
+    __typename
+    ... on RequestMerchantProfileUpdateSuccessPayload {
+      requestMerchantProfileUpdate {
+        id
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
+fragment FnciInfo on FnciInfo {
+  colorCode
+  cpt1
+  cpt2
+  cpt3
+  holderEstablishment
+}
+
+mutation InitiateCheckMerchantPayment($input: InitiateCheckMerchantPaymentInput!) {
+  initiateCheckMerchantPayment(input: $input) {
+    __typename
+    ... on InitiateCheckMerchantPaymentSuccessPayload {
+      fnciInfo {
+        ...FnciInfo
+      }
+    }
+    ... on CheckRejection {
+      fnciInfo {
+        ...FnciInfo
+      }
+    }
+    ... on ValidationRejection {
+      fields {
+        path
+      }
+    }
+    ... on Rejection {
+      message
+    }
+  }
+}
+
+mutation CloseAccount($input: CloseAccountInput!) {
+  closeAccount(input: $input) {
+    ... on CloseAccountSuccessPayload {
+      consent {
+        id
+        consentUrl
+      }
+    }
+    ... on Rejection {
+      __typename
+      message
     }
   }
 }

@@ -37,7 +37,8 @@ query GetAccountMembershipInvitationData(
     email
     user {
       firstName
-      lastName
+      preferredLastName
+      fullName
     }
     account {
       name
@@ -62,6 +63,7 @@ query GetAccountMembershipInvitationData(
       ... on AccountMembershipInvitationSentStatusInfo {
         restrictedTo {
           firstName
+          phoneNumber
         }
       }
     }

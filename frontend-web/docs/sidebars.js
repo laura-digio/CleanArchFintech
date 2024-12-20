@@ -7,7 +7,7 @@
  Create as many sidebars as you want.
  */
 
-module.exports = {
+const sidebars = {
   docs: [
     {
       type: "category",
@@ -34,6 +34,10 @@ module.exports = {
         {
           type: "doc",
           id: "build-deploy",
+        },
+        {
+          type: "doc",
+          id: "deploy-as-is",
         },
       ],
     },
@@ -156,3 +160,5 @@ module.exports = {
     },
   ],
 };
+
+export default sidebars;

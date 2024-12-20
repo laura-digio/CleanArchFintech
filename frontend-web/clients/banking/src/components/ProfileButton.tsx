@@ -4,7 +4,6 @@ import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { Link } from "@swan-io/lake/src/components/Link";
 import { SidebarNavigationTrackerActiveMarker } from "@swan-io/lake/src/components/SidebarNavigationTracker";
 import { Space } from "@swan-io/lake/src/components/Space";
-import { Tag } from "@swan-io/lake/src/components/Tag";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import {
   backgroundColor,
@@ -13,12 +12,10 @@ import {
   radii,
   spacings,
 } from "@swan-io/lake/src/constants/design";
-import { isNotEmpty } from "@swan-io/lake/src/utils/nullish";
+import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
-import { match } from "ts-pattern";
-import { IdentificationStatus } from "../graphql/partner";
-import { t } from "../utils/i18n";
+import { AccountAreaQuery } from "../graphql/partner";
 import { Router } from "../utils/routes";
 
 const styles = StyleSheet.create({
@@ -48,72 +45,42 @@ const styles = StyleSheet.create({
 });
 
 type Props = {
-  firstName: string;
-  lastName: string;
-  identificationStatus: IdentificationStatus;
+  user: NonNullable<AccountAreaQuery["user"]>;
   accountMembershipId: string;
-  shouldDisplayIdVerification: boolean;
 };
 
-export const ProfileButton = memo<Props>(
-  ({
-    firstName,
-    lastName,
-    identificationStatus,
-    accountMembershipId,
-    shouldDisplayIdVerification,
-  }) => {
-    const names = [firstName, lastName].filter(isNotEmpty);
-    const fullName = names.join(" ");
-    const initials = names.map(name => name[0]).join("");
+export const ProfileButton = memo<Props>(({ user, accountMembershipId }) => {
+  const fullName = user.fullName;
 
-    return (
-      <Link style={styles.link} to={Router.AccountProfile({ accountMembershipId })}>
-        {({ active }) => (
-          <View role="button" style={styles.button}>
-            <Avatar size={25} initials={initials} />
+  return (
+    <Link style={styles.link} to={Router.AccountProfile({ accountMembershipId })}>
+      {({ active }) => (
+        <View role="button" style={styles.button}>
+          <Avatar size={25} user={user} />
 
-            {fullName && (
-              <>
-                <Space width={16} />
+          {isNotNullish(fullName) && (
+            <>
+              <Space width={16} />
 
-                <View style={styles.informations}>
-                  <LakeText
-                    numberOfLines={1}
-                    userSelect="none"
-                    variant="smallMedium"
-                    color={colors.gray[700]}
-                  >
-                    {fullName}
-                  </LakeText>
+              <View style={styles.informations}>
+                <LakeText
+                  numberOfLines={1}
+                  userSelect="none"
+                  variant="smallMedium"
+                  color={colors.gray[700]}
+                >
+                  {fullName}
+                </LakeText>
+              </View>
+            </>
+          )}
 
-                  {shouldDisplayIdVerification
-                    ? match(identificationStatus)
-                        .with(
-                          "Uninitiated",
-                          "InvalidIdentity",
-                          "InsufficientDocumentQuality",
-                          "ReadyToSign",
-                          () => (
-                            <>
-                              <Space height={4} />
-                              <Tag color="warning">{t("profile.actionRequired")}</Tag>
-                            </>
-                          ),
-                        )
-                        .otherwise(() => null)
-                    : null}
-                </View>
-              </>
-            )}
+          <Space width={12} />
+          <Icon name="chevron-right-filled" size={16} color={colors.gray[700]} />
 
-            <Space width={12} />
-            <Icon name="chevron-right-filled" size={16} color={colors.gray[700]} />
-
-            {active ? <SidebarNavigationTrackerActiveMarker color={colors.current[500]} /> : null}
-          </View>
-        )}
-      </Link>
-    );
-  },
-);
+          {active ? <SidebarNavigationTrackerActiveMarker color={colors.current[500]} /> : null}
+        </View>
+      )}
+    </Link>
+  );
+});

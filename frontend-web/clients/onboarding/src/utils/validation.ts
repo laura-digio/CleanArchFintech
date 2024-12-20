@@ -1,14 +1,15 @@
 import { Array, Option } from "@swan-io/boxed";
 import { isEmpty } from "@swan-io/lake/src/utils/nullish";
 import { isValidEmail, isValidVatNumber } from "@swan-io/shared-business/src/utils/validation";
-import { Validator } from "react-ux-form";
+import { combineValidators, Validator } from "@swan-io/use-form";
+import dayjs from "dayjs";
 import { match } from "ts-pattern";
 import {
   OnboardingInvalidInfoFragment,
   UpdateValidationErrorsFragment,
   ValidationFieldErrorCode,
 } from "../graphql/unauthenticated";
-import { t } from "./i18n";
+import { locale, t } from "./i18n";
 
 export const validateRequiredBoolean: Validator<boolean | undefined> = value => {
   if (typeof value != "boolean") {
@@ -19,6 +20,28 @@ export const validateRequiredBoolean: Validator<boolean | undefined> = value => 
 export const validateRequired: Validator<string> = value => {
   if (!value) {
     return t("error.requiredField");
+  }
+};
+
+// This regex was copied from the backend to ensure that the validation is the same
+// Matches all unicode letters, spaces, dashes, apostrophes, commas, and single quotes
+const VALID_NAME_RE =
+  /^(?:[A-Za-zÀ-ÖÙ-öù-ƿǄ-ʯʹ-ʽΈ-ΊΎ-ΡΣ-ҁҊ-Ֆա-ևႠ-Ⴥა-ჺᄀ-፜፩-ᎏᵫ-ᶚḀ-῾ⴀ-ⴥ⺀-⿕ぁ-ゖゝ-ㇿ㋿-鿯鿿-ꒌꙀ-ꙮꚀ-ꚙꜦ-ꞇꞍ-ꞿꥠ-ꥼＡ-Ｚａ-ｚ.]| |'|-|Ά|Ό|,)*$/;
+
+export const validateName: Validator<string> = value => {
+  if (!value) {
+    return t("error.requiredField");
+  }
+
+  // Rule copied from the backend
+  if (value.length > 100) {
+    return t("error.invalidName");
+  }
+
+  const isValid = VALID_NAME_RE.test(value);
+
+  if (!isValid) {
+    return t("error.invalidName");
   }
 };
 
@@ -94,3 +117,12 @@ export const validateVatNumber: Validator<string> = value => {
     return t("common.form.invalidVatNumber");
   }
 };
+
+export const validateDate: Validator<string> = combineValidators<string>(
+  validateRequired,
+  value => {
+    if (!dayjs(value, locale.dateFormat, true).isValid()) {
+      return t("common.form.invalidDate");
+    }
+  },
+);

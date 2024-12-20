@@ -1,31 +1,39 @@
-import { Array, Option } from "@swan-io/boxed";
+import { Option } from "@swan-io/boxed";
 import { Link } from "@swan-io/chicane";
+import { useDeferredQuery, useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
-import { PlainListViewPlaceholder } from "@swan-io/lake/src/components/FixedListView";
 import { FocusTrapRef } from "@swan-io/lake/src/components/FocusTrap";
 import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { ListRightPanel } from "@swan-io/lake/src/components/ListRightPanel";
-import { LoadingView } from "@swan-io/lake/src/components/LoadingView";
+import { PlainListViewPlaceholder } from "@swan-io/lake/src/components/PlainListView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints, colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { nullishOrEmptyToUndefined } from "@swan-io/lake/src/utils/nullish";
+import { Request } from "@swan-io/request";
 import { LakeModal } from "@swan-io/shared-business/src/components/LakeModal";
-import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { StyleSheet, View } from "react-native";
-import { P, match } from "ts-pattern";
-import { AccountCountry, AccountMembershipFragment, MembersPageDocument } from "../graphql/partner";
-import { t } from "../utils/i18n";
+import { P, isMatching, match } from "ts-pattern";
+import { Except } from "type-fest";
+import {
+  AccountCountry,
+  AccountMembershipFragment,
+  MembersPageDocument,
+  MembershipDetailDocument,
+} from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
+import { locale, t } from "../utils/i18n";
 import { projectConfiguration } from "../utils/projectId";
-import { Router, membershipsRoutes } from "../utils/routes";
+import { GetRouteParams, Router, membershipsRoutes } from "../utils/routes";
+import { Connection } from "./Connection";
 import { ErrorView } from "./ErrorView";
 import { MembershipDetailArea } from "./MembershipDetailArea";
 import { MembershipInvitationLinkModal } from "./MembershipInvitationLinkModal";
 import { MembershipList } from "./MembershipList";
-import { MembershipFilters, MembershipListFilter } from "./MembershipListFilter";
+import { MembershipFilters, MembershipListFilter, parseBooleanParam } from "./MembershipListFilter";
 import { NewMembershipWizard } from "./NewMembershipWizard";
 
 const styles = StyleSheet.create({
@@ -45,123 +53,69 @@ const styles = StyleSheet.create({
 type Props = {
   accountMembershipId: string;
   accountId: string;
-  memberCreationVisible: boolean;
-  canAddCard: boolean;
-  cardOrderVisible: boolean;
-  physicalCardOrderVisible: boolean;
   accountCountry: AccountCountry;
   shouldDisplayIdVerification: boolean;
-  params: {
-    new?: string;
-    search?: string | undefined;
-    statuses?: string[] | undefined;
-    canInitiatePayments?: string | undefined;
-    canManageAccountMembership?: string | undefined;
-    canManageBeneficiaries?: string | undefined;
-    canViewAccount?: string | undefined;
-    canManageCards?: string | undefined;
-    // Params added after consent
-    resourceId?: string | undefined;
-    status?: string | undefined;
-  };
+  params: Except<GetRouteParams<"AccountMembersArea">, "accountMembershipId">;
   currentUserAccountMembership: AccountMembershipFragment;
   onAccountMembershipUpdate: () => void;
 };
 
 const PER_PAGE = 20;
 
-const statusList = ["BindingUserError", "Enabled", "InvitationSent", "Suspended"] as const;
-
 export const MembershipsArea = ({
   accountMembershipId,
   accountId,
-  memberCreationVisible,
-  canAddCard,
-  cardOrderVisible,
-  physicalCardOrderVisible,
   accountCountry,
   shouldDisplayIdVerification,
   params,
   currentUserAccountMembership,
   onAccountMembershipUpdate,
 }: Props) => {
+  const { canAddAccountMembership } = usePermissions();
+  const [, { query: queryLastCreatedMembership }] = useDeferredQuery(MembershipDetailDocument);
   const route = Router.useRoute(membershipsRoutes);
 
-  const filters: MembershipFilters = useMemo(() => {
-    return {
-      statuses: isNotNullish(params.statuses)
-        ? Array.filterMap(params.statuses, item =>
-            match(item)
-              .with(...statusList, value => Option.Some(value))
-              .otherwise(() => Option.None()),
-          )
-        : undefined,
-      canInitiatePayments: match(params.canInitiatePayments)
-        .with("true", "false", value => value)
-        .otherwise(() => undefined),
-      canManageAccountMembership: match(params.canManageAccountMembership)
-        .with("true", "false", value => value)
-        .otherwise(() => undefined),
-      canManageBeneficiaries: match(params.canManageBeneficiaries)
-        .with("true", "false", value => value)
-        .otherwise(() => undefined),
-      canManageCards: match(params.canManageCards)
-        .with("true", "false", value => value)
-        .otherwise(() => undefined),
-      canViewAccount: match(params.canViewAccount)
-        .with("true", "false", value => value)
-        .otherwise(() => undefined),
-      search: params.search,
-    } as const;
-  }, [
-    params.search,
-    params.statuses,
-    params.canInitiatePayments,
-    params.canManageAccountMembership,
-    params.canManageBeneficiaries,
-    params.canViewAccount,
-    params.canManageCards,
-  ]);
-
-  const { data, nextData, reload, setAfter } = useUrqlPaginatedQuery(
-    {
-      query: MembersPageDocument,
-      variables: {
-        first: PER_PAGE,
-        accountId,
-        status: match(filters.statuses)
-          .with(undefined, () => [
-            "BindingUserError" as const,
-            "Enabled" as const,
-            "InvitationSent" as const,
-            "Suspended" as const,
-          ])
-          .otherwise(() => filters.statuses),
-        canInitiatePayments: match(filters.canInitiatePayments)
-          .with("true", () => true)
-          .with("false", () => false)
-          .otherwise(() => undefined),
-        canManageAccountMembership: match(filters.canManageAccountMembership)
-          .with("true", () => true)
-          .with("false", () => false)
-          .otherwise(() => undefined),
-        canManageBeneficiaries: match(filters.canManageBeneficiaries)
-          .with("true", () => true)
-          .with("false", () => false)
-          .otherwise(() => undefined),
-        canManageCards: match(filters.canManageCards)
-          .with("true", () => true)
-          .with("false", () => false)
-          .otherwise(() => undefined),
-        canViewAccount: match(filters.canViewAccount)
-          .with("true", () => true)
-          .with("false", () => false)
-          .otherwise(() => undefined),
-        search: filters.search,
-      },
-    },
-    [accountId, filters],
+  const filters = useMemo<MembershipFilters>(
+    () => ({
+      statuses: params.statuses?.filter(
+        isMatching(P.union("BindingUserError", "Enabled", "InvitationSent", "Suspended")),
+      ),
+      canViewAccount: parseBooleanParam(params.canViewAccount),
+      canManageCards: parseBooleanParam(params.canManageCards),
+      canInitiatePayments: parseBooleanParam(params.canInitiatePayments),
+      canManageAccountMembership: parseBooleanParam(params.canManageAccountMembership),
+      canManageBeneficiaries: parseBooleanParam(params.canManageBeneficiaries),
+    }),
+    [
+      params.statuses,
+      params.canViewAccount,
+      params.canManageCards,
+      params.canInitiatePayments,
+      params.canManageAccountMembership,
+      params.canManageBeneficiaries,
+    ],
   );
+
+  const search = nullishOrEmptyToUndefined(params.search);
+
+  const [data, { isLoading, reload, setVariables }] = useQuery(MembersPageDocument, {
+    first: PER_PAGE,
+    accountId,
+    search,
+    status: match(filters.statuses)
+      .with(undefined, () => [
+        "BindingUserError" as const,
+        "Enabled" as const,
+        "InvitationSent" as const,
+        "Suspended" as const,
+      ])
+      .otherwise(() => filters.statuses),
+    canViewAccount: filters.canViewAccount,
+    canManageCards: filters.canManageCards,
+    canInitiatePayments: filters.canInitiatePayments,
+    canManageAccountMembership: filters.canManageAccountMembership,
+    canManageBeneficiaries: filters.canManageBeneficiaries,
+  });
 
   const editingAccountMembershipId = match(route)
     .with(
@@ -169,13 +123,6 @@ export const MembershipsArea = ({
       ({ params: { editingAccountMembershipId } }) => editingAccountMembershipId,
     )
     .otherwise(() => null);
-
-  const memberships = data
-    .toOption()
-    .flatMap(data => data.toOption())
-    .flatMap(({ account }) => Option.fromNullable(account?.memberships))
-    .map(({ edges }) => edges.map(({ node }) => node))
-    .getWithDefault([]);
 
   const panelRef = useRef<FocusTrapRef | null>(null);
 
@@ -208,35 +155,36 @@ export const MembershipsArea = ({
           accountMembershipInvitationMode: "EMAIL",
         },
         ({ params: { resourceId } }) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open(
-            "POST",
-            match(projectConfiguration)
+          queryLastCreatedMembership({ accountMembershipId: resourceId }).tapOk(membership => {
+            const query = new URLSearchParams();
+
+            query.append("inviterAccountMembershipId", accountMembershipId);
+            query.append("lang", membership.accountMembership?.language ?? locale.language);
+
+            const url = match(projectConfiguration)
               .with(
                 Option.P.Some({ projectId: P.select(), mode: "MultiProject" }),
                 projectId =>
-                  `/api/projects/${projectId}/invitation/${resourceId}/send?inviterAccountMembershipId=${accountMembershipId}`,
+                  `/api/projects/${projectId}/invitation/${resourceId}/send?${query.toString()}`,
               )
-              .otherwise(
-                () =>
-                  `/api/invitation/${resourceId}/send?inviterAccountMembershipId=${accountMembershipId}`,
-              ),
-            true,
-          );
-          xhr.addEventListener("load", () => {
-            Router.replace("AccountMembersList", {
-              ...params,
-              accountMembershipId,
-              resourceId: undefined,
-              status: undefined,
+              .otherwise(() => `/api/invitation/${resourceId}/send?${query.toString()}`);
+
+            Request.make({
+              url,
+              method: "POST",
+            }).tap(() => {
+              Router.replace("AccountMembersList", {
+                ...params,
+                accountMembershipId,
+                resourceId: undefined,
+                status: undefined,
+              });
             });
           });
-          xhr.send(null);
-          return () => xhr.abort();
         },
       )
       .otherwise(() => {});
-  }, [params, accountMembershipId]);
+  }, [params, accountMembershipId, queryLastCreatedMembership]);
 
   return (
     <ResponsiveContainer breakpoint={breakpoints.large} style={styles.root}>
@@ -246,18 +194,27 @@ export const MembershipsArea = ({
             <Box style={[styles.filters, large && styles.filtersLarge]}>
               <MembershipListFilter
                 filters={filters}
-                onChange={filters =>
-                  Router.push("AccountMembersList", {
+                search={search}
+                onChangeFilters={filters => {
+                  Router.replace("AccountMembersList", {
                     accountMembershipId,
+                    ...params,
                     ...filters,
-                  })
-                }
+                    canViewAccount: String(filters.canViewAccount),
+                    canManageCards: String(filters.canManageCards),
+                    canInitiatePayments: String(filters.canInitiatePayments),
+                    canManageAccountMembership: String(filters.canManageAccountMembership),
+                    canManageBeneficiaries: String(filters.canManageBeneficiaries),
+                  });
+                }}
+                onChangeSearch={search => {
+                  Router.replace("AccountMembersList", { accountMembershipId, ...params, search });
+                }}
                 onRefresh={reload}
-                totalCount={memberships.length}
-                isFetching={nextData.isLoading()}
+                totalCount={data.mapOk(data => data.account?.memberships.totalCount ?? 0)}
                 large={large}
               >
-                {memberCreationVisible ? (
+                {canAddAccountMembership ? (
                   <LakeButton
                     size="small"
                     icon="add-circle-filled"
@@ -275,101 +232,125 @@ export const MembershipsArea = ({
             {data.match({
               NotAsked: () => null,
               Loading: () => (
-                <PlainListViewPlaceholder
-                  count={20}
-                  rowVerticalSpacing={0}
-                  headerHeight={large ? 48 : 0}
-                  rowHeight={56}
-                />
+                <PlainListViewPlaceholder count={20} headerHeight={large ? 48 : 0} rowHeight={56} />
               ),
               Done: result =>
                 result.match({
                   Error: error => <ErrorView error={error} />,
                   Ok: ({ account }) => (
-                    <MembershipList
-                      memberships={account?.memberships.edges.map(({ node }) => node) ?? []}
-                      accountMembershipId={accountMembershipId}
-                      onActiveRowChange={onActiveRowChange}
-                      editingAccountMembershipId={editingAccountMembershipId ?? undefined}
-                      onEndReached={() => {
-                        if (account?.memberships.pageInfo.hasNextPage === true) {
-                          setAfter(account?.memberships.pageInfo.endCursor ?? undefined);
-                        }
+                    <Connection connection={account?.memberships}>
+                      {memberships => {
+                        return (
+                          <>
+                            <MembershipList
+                              large={large}
+                              memberships={memberships?.edges.map(({ node }) => node) ?? []}
+                              accountMembershipId={accountMembershipId}
+                              onActiveRowChange={onActiveRowChange}
+                              editingAccountMembershipId={editingAccountMembershipId ?? undefined}
+                              onEndReached={() => {
+                                if (memberships?.pageInfo.hasNextPage === true) {
+                                  setVariables({
+                                    after: memberships.pageInfo.endCursor ?? undefined,
+                                  });
+                                }
+                              }}
+                              loading={{
+                                isLoading,
+                                count: PER_PAGE,
+                              }}
+                              getRowLink={({ item }) => (
+                                <Link
+                                  style={match(item)
+                                    .with(
+                                      {
+                                        statusInfo: {
+                                          __typename: "AccountMembershipBindingUserErrorStatusInfo",
+                                          idVerifiedMatchError: true,
+                                        },
+                                      },
+                                      {
+                                        statusInfo: {
+                                          __typename: "AccountMembershipBindingUserErrorStatusInfo",
+                                          emailVerifiedMatchError: true,
+                                        },
+                                        user: { verifiedEmails: [] },
+                                      },
+                                      () => ({
+                                        backgroundColor: colors.warning[50],
+                                      }),
+                                    )
+                                    .with(
+                                      {
+                                        statusInfo: {
+                                          __typename: "AccountMembershipBindingUserErrorStatusInfo",
+                                        },
+                                      },
+                                      () => ({
+                                        backgroundColor: colors.negative[50],
+                                      }),
+                                    )
+                                    .otherwise(() => undefined)}
+                                  to={Router.AccountMembersDetailsRoot({
+                                    accountMembershipId,
+                                    ...params,
+                                    editingAccountMembershipId: item.id,
+                                  })}
+                                />
+                              )}
+                              onRefreshRequest={() => {
+                                reload();
+                              }}
+                            />
+
+                            <ListRightPanel
+                              ref={panelRef}
+                              keyExtractor={item => item.id}
+                              activeId={editingAccountMembershipId}
+                              onActiveIdChange={editingAccountMembershipId =>
+                                Router.push("AccountMembersDetailsRoot", {
+                                  accountMembershipId,
+                                  editingAccountMembershipId,
+                                  ...params,
+                                })
+                              }
+                              onClose={() =>
+                                Router.push("AccountMembersList", {
+                                  accountMembershipId,
+                                  ...params,
+                                })
+                              }
+                              items={memberships?.edges.map(item => item.node) ?? []}
+                              render={(membership, large) => (
+                                <MembershipDetailArea
+                                  params={params}
+                                  currentUserAccountMembershipId={accountMembershipId}
+                                  currentUserAccountMembership={currentUserAccountMembership}
+                                  editingAccountMembershipId={membership.id}
+                                  onAccountMembershipUpdate={onAccountMembershipUpdate}
+                                  accountCountry={accountCountry}
+                                  shouldDisplayIdVerification={shouldDisplayIdVerification}
+                                  onRefreshRequest={() => {
+                                    reload();
+                                  }}
+                                  large={large}
+                                />
+                              )}
+                              closeLabel={t("common.closeButton")}
+                              previousLabel={t("common.previous")}
+                              nextLabel={t("common.next")}
+                            />
+                          </>
+                        );
                       }}
-                      loading={{
-                        isLoading: nextData.isLoading(),
-                        count: PER_PAGE,
-                      }}
-                      getRowLink={({ item }) => (
-                        <Link
-                          style={match(item.statusInfo)
-                            .with(
-                              {
-                                __typename: "AccountMembershipBindingUserErrorStatusInfo",
-                                idVerifiedMatchError: true,
-                              },
-                              () => ({
-                                backgroundColor: colors.warning[50],
-                              }),
-                            )
-                            .with(
-                              { __typename: "AccountMembershipBindingUserErrorStatusInfo" },
-                              () => ({
-                                backgroundColor: colors.negative[50],
-                              }),
-                            )
-                            .otherwise(() => undefined)}
-                          to={Router.AccountMembersDetailsRoot({
-                            accountMembershipId,
-                            ...params,
-                            editingAccountMembershipId: item.id,
-                          })}
-                        />
-                      )}
-                      onRefreshRequest={reload}
-                    />
+                    </Connection>
                   ),
                 }),
             })}
           </View>
 
-          <ListRightPanel
-            ref={panelRef}
-            keyExtractor={item => item.id}
-            activeId={editingAccountMembershipId}
-            onActiveIdChange={editingAccountMembershipId =>
-              Router.push("AccountMembersDetailsRoot", {
-                accountMembershipId,
-                editingAccountMembershipId,
-                ...params,
-              })
-            }
-            onClose={() => Router.push("AccountMembersList", { accountMembershipId, ...params })}
-            items={memberships}
-            render={(membership, large) => (
-              <Suspense fallback={<LoadingView color={colors.current[500]} />}>
-                <MembershipDetailArea
-                  params={params}
-                  currentUserAccountMembershipId={accountMembershipId}
-                  currentUserAccountMembership={currentUserAccountMembership}
-                  editingAccountMembershipId={membership.id}
-                  onAccountMembershipUpdate={onAccountMembershipUpdate}
-                  canAddCard={cardOrderVisible && canAddCard}
-                  physicalCardOrderVisible={physicalCardOrderVisible}
-                  accountCountry={accountCountry}
-                  shouldDisplayIdVerification={shouldDisplayIdVerification}
-                  onRefreshRequest={reload}
-                  large={large}
-                />
-              </Suspense>
-            )}
-            closeLabel={t("common.closeButton")}
-            previousLabel={t("common.previous")}
-            nextLabel={t("common.next")}
-          />
-
           <LakeModal
-            visible={params.new != null}
+            visible={params.new != null && canAddAccountMembership}
             icon="add-circle-regular"
             maxWidth={breakpoints.medium}
             title={t("membershipList.newMember.title")}

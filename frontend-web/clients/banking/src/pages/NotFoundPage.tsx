@@ -5,8 +5,8 @@ import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
-import { backgroundColor, breakpoints, colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useResponsive } from "@swan-io/lake/src/hooks/useResponsive";
+import { backgroundColor, colors, spacings } from "@swan-io/lake/src/constants/design";
+import { ReactNode } from "react";
 import { StyleProp, StyleSheet, ViewStyle } from "react-native";
 import { t } from "../utils/i18n";
 import { signout } from "../utils/signout";
@@ -56,14 +56,22 @@ export const NotFoundPage = ({ title = t("error.pageNotFound"), text = "", style
   </Box>
 );
 
-export const AccountNotFoundPage = ({ projectName }: { projectName: string }) => {
-  const { desktop } = useResponsive(breakpoints.medium);
-
+export const AccountNotFoundPage = ({
+  projectName,
+  children,
+  large,
+}: {
+  projectName: string;
+  children?: ReactNode;
+  large: boolean;
+}) => {
   const content = (
     <Box
       alignItems="center"
-      style={[styles.noAccountContainer, desktop && styles.noAccountContainerDesktop]}
+      style={[styles.noAccountContainer, large && styles.noAccountContainerDesktop]}
     >
+      {children}
+
       <BorderedIcon name="lake-building-bank" size={100} padding={8} />
       <Space height={24} />
 
@@ -83,7 +91,7 @@ export const AccountNotFoundPage = ({ projectName }: { projectName: string }) =>
 
   return (
     <Box alignItems="center" justifyContent="center" style={styles.noAccountPage}>
-      {desktop ? <Tile style={styles.tile}>{content}</Tile> : content}
+      {large ? <Tile style={styles.tile}>{content}</Tile> : content}
     </Box>
   );
 };

@@ -8,7 +8,7 @@ const { version } = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "package.json"), "utf-8"),
 ) as { version: string };
 
-const apps = ["onboarding", "banking"];
+const apps = ["onboarding", "banking", "payment"];
 
 console.log(``);
 console.log(`${pc.magenta("swan-partner-frontend")}`);
@@ -16,7 +16,7 @@ console.log(`${pc.white("---")}`);
 
 void (async () => {
   console.log(`${pc.magenta("server")} ${pc.gray("building")}`);
-  execSync(`cd server && yarn build`);
+  execSync(`cd server && pnpm build`);
   console.log(`${pc.magenta("server")} ${pc.green("done")}`);
   console.log(``);
 
@@ -33,6 +33,7 @@ void (async () => {
           // always be invalidated due to credentials being sent (i.e. Cookies)
           polyfillModulePreload: false,
           sourcemap: true,
+          target: ["es2019", "edge80", "firefox72", "chrome80", "safari12"],
           assetsDir: `assets/${version}`,
         },
       });

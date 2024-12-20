@@ -1,3 +1,5 @@
+import { useQuery } from "@swan-io/graphql-client";
+import { FlatList } from "@swan-io/lake/src/components/FlatList";
 import { Icon } from "@swan-io/lake/src/components/Icon";
 import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
@@ -13,11 +15,10 @@ import {
   radii,
   spacings,
 } from "@swan-io/lake/src/constants/design";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
 import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
 import { GetNode } from "@swan-io/lake/src/utils/types";
 import { forwardRef, useCallback, useEffect, useState } from "react";
-import { FlatList, GestureResponderEvent, Pressable, StyleSheet, View } from "react-native";
+import { GestureResponderEvent, Pressable, StyleSheet, View } from "react-native";
 import { match } from "ts-pattern";
 import {
   AccountAreaQuery,
@@ -27,6 +28,7 @@ import {
 } from "../graphql/partner";
 import { formatCurrency, t } from "../utils/i18n";
 import { Router } from "../utils/routes";
+import { Connection } from "./Connection";
 
 const styles = StyleSheet.create({
   container: {
@@ -165,21 +167,14 @@ const Item = ({ onPress, isActive, membership }: ItemProps) => {
 
 type Props = {
   accountMembershipId: string;
-  availableBalance?: Amount;
   onPressItem: (accountMembershipId: string) => void;
 };
 
 export const AccountPicker = ({ accountMembershipId, onPressItem }: Props) => {
-  const { data: accountMemberships, setAfter } = useUrqlPaginatedQuery(
-    {
-      query: GetAccountMembershipsDocument,
-      variables: {
-        first: 10,
-        filters: { status: ["BindingUserError", "ConsentPending", "Enabled", "InvitationSent"] },
-      },
-    },
-    [],
-  );
+  const [accountMemberships, { setVariables }] = useQuery(GetAccountMembershipsDocument, {
+    first: 10,
+    filters: { status: ["BindingUserError", "ConsentPending", "Enabled", "InvitationSent"] },
+  });
 
   const [showScrollAid, setShowScrollAid] = useState(false);
 
@@ -208,29 +203,32 @@ export const AccountPicker = ({ accountMembershipId, onPressItem }: Props) => {
         Ok: ({ user }) =>
           user == null ? null : (
             <View>
-              <FlatList
-                role="list"
-                style={styles.list}
-                data={user.accountMemberships.edges}
-                disableVirtualization={true}
-                keyExtractor={item => `AccountSelector${item.node.id}`}
-                onScroll={handleScroll}
-                renderItem={({ item }) => (
-                  <Item
-                    membership={item.node}
-                    isActive={accountMembershipId === item.node.id}
-                    onPress={() => {
-                      onPressItem(item.node.id);
+              <Connection connection={user.accountMemberships}>
+                {accountMemberships => (
+                  <FlatList
+                    role="list"
+                    style={styles.list}
+                    data={accountMemberships.edges}
+                    keyExtractor={item => `AccountSelector${item.node.id}`}
+                    onScroll={handleScroll}
+                    renderItem={({ item }) => (
+                      <Item
+                        membership={item.node}
+                        isActive={accountMembershipId === item.node.id}
+                        onPress={() => {
+                          onPressItem(item.node.id);
+                        }}
+                      />
+                    )}
+                    onEndReached={() => {
+                      const endCursor = accountMemberships.pageInfo.endCursor;
+                      if (endCursor != null) {
+                        setVariables({ after: endCursor });
+                      }
                     }}
                   />
                 )}
-                onEndReached={() => {
-                  const endCursor = user.accountMemberships.pageInfo.endCursor;
-                  if (endCursor != null) {
-                    setAfter(endCursor);
-                  }
-                }}
-              />
+              </Connection>
 
               <View
                 style={[styles.bottomGradient, showScrollAid && styles.visibleBottomGradient]}
@@ -242,7 +240,14 @@ export const AccountPicker = ({ accountMembershipId, onPressItem }: Props) => {
   });
 };
 
-export type AccountActivationTag = "actionRequired" | "pending" | "none" | "refused";
+export type AccountActivationTag =
+  | "actionRequired"
+  | "pending"
+  | "none"
+  | "refused"
+  | "suspended"
+  | "closing"
+  | "closed";
 
 type AccountPickerButtonProps = {
   desktop: boolean;
@@ -282,14 +287,12 @@ export const AccountPickerButton = forwardRef<View, AccountPickerButtonProps>(
           >
             <View style={styles.accountIdentifier}>
               <LakeHeading variant="h5" level={3} numberOfLines={3} color={colors.gray[900]}>
-                {selectedAccountMembership.canViewAccount &&
-                selectedAccountMembership.account != null
+                {selectedAccountMembership.account != null
                   ? selectedAccountMembership.account.name
                   : selectedAccountMembership.email}
               </LakeHeading>
 
-              {selectedAccountMembership.canViewAccount &&
-              selectedAccountMembership.account != null ? (
+              {selectedAccountMembership.account != null ? (
                 <LakeText variant="smallRegular" numberOfLines={1} color={colors.gray[500]}>
                   {selectedAccountMembership.account.holder.info.name}
                 </LakeText>
@@ -303,15 +306,13 @@ export const AccountPickerButton = forwardRef<View, AccountPickerButtonProps>(
             )}
           </Pressable>
 
-          {isNotNullish(availableBalance) &&
-            desktop &&
-            selectedAccountMembership.canViewAccount && (
-              <View style={styles.balance}>
-                <LakeText variant="semibold" color={colors.gray[900]}>
-                  {formatCurrency(Number(availableBalance.value), availableBalance.currency)}
-                </LakeText>
-              </View>
-            )}
+          {isNotNullish(availableBalance) && desktop && (
+            <View style={styles.balance}>
+              <LakeText variant="semibold" color={colors.gray[900]}>
+                {formatCurrency(Number(availableBalance.value), availableBalance.currency)}
+              </LakeText>
+            </View>
+          )}
 
           {activationTag !== "none" && (
             <View>
@@ -320,6 +321,27 @@ export const AccountPickerButton = forwardRef<View, AccountPickerButtonProps>(
                   <View style={styles.activationLink}>
                     <Tag color="negative" size="small">
                       {t("accountActivation.menuTag.refused")}
+                    </Tag>
+                  </View>
+                ))
+                .with("suspended", () => (
+                  <View style={styles.activationLink}>
+                    <Tag color="warning" size="small">
+                      {t("accountActivation.menuTag.suspended")}
+                    </Tag>
+                  </View>
+                ))
+                .with("closing", () => (
+                  <View style={styles.activationLink}>
+                    <Tag color="warning" size="small">
+                      {t("accountActivation.menuTag.closing")}
+                    </Tag>
+                  </View>
+                ))
+                .with("closed", () => (
+                  <View style={styles.activationLink}>
+                    <Tag color="negative" size="small">
+                      {t("accountActivation.menuTag.closed")}
                     </Tag>
                   </View>
                 ))
@@ -343,7 +365,6 @@ export const AccountPickerButton = forwardRef<View, AccountPickerButtonProps>(
                           {t("accountActivation.menuTag.pending")}
                         </Tag>
                       ))
-
                       .exhaustive()}
 
                     <Icon name="arrow-right-filled" size={16} color={colors.gray[500]} />

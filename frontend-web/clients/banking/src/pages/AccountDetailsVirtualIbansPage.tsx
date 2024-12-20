@@ -1,32 +1,28 @@
-import {
-  FixedListViewEmpty,
-  PlainListViewPlaceholder,
-} from "@swan-io/lake/src/components/FixedListView";
-import {
-  CopyableRegularTextCell,
-  EndAlignedCell,
-  SimpleHeaderCell,
-} from "@swan-io/lake/src/components/FixedListViewCells";
+import { Option } from "@swan-io/boxed";
+import { useMutation, useQuery } from "@swan-io/graphql-client";
+import { Cell, CopyableTextCell, HeaderCell } from "@swan-io/lake/src/components/Cells";
+import { EmptyView } from "@swan-io/lake/src/components/EmptyView";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
-import { ColumnConfig, PlainListView } from "@swan-io/lake/src/components/PlainListView";
-import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
+import {
+  ColumnConfig,
+  PlainListView,
+  PlainListViewPlaceholder,
+} from "@swan-io/lake/src/components/PlainListView";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tag } from "@swan-io/lake/src/components/Tag";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
-import { breakpoints, spacings } from "@swan-io/lake/src/constants/design";
+import { spacings } from "@swan-io/lake/src/constants/design";
 import { useBoolean } from "@swan-io/lake/src/hooks/useBoolean";
-import { useResponsive } from "@swan-io/lake/src/hooks/useResponsive";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { GetEdge } from "@swan-io/lake/src/utils/types";
-import { filterRejectionsToPromise, parseOperationResult } from "@swan-io/lake/src/utils/urql";
 import { LakeModal } from "@swan-io/shared-business/src/components/LakeModal";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
+import { printIbanFormat } from "@swan-io/shared-business/src/utils/validation";
 import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { match } from "ts-pattern";
-import { useMutation } from "urql";
+import { Connection } from "../components/Connection";
 import { ErrorView } from "../components/ErrorView";
 import {
   AccountDetailsVirtualIbansPageDocument,
@@ -34,13 +30,10 @@ import {
   AddVirtualIbanDocument,
   CancelVirtualIbanDocument,
 } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { t } from "../utils/i18n";
-import { printIbanFormat } from "../utils/iban";
 
 const styles = StyleSheet.create({
-  root: {
-    ...commonStyles.fill,
-  },
   header: {
     alignItems: "flex-start",
     paddingHorizontal: spacings[24],
@@ -53,17 +46,18 @@ const styles = StyleSheet.create({
 
 type Props = {
   accountId: string;
+  large: boolean;
 };
 
 type Account = NonNullable<AccountDetailsVirtualIbansPageQuery["account"]>;
 type Edge = GetEdge<Account["virtualIbanEntries"]>;
-type ExtraInfo = { reload: () => void };
+type ExtraInfo = { reload: () => void; canCancelVirtualIBAN: boolean };
 
 const IbanCell = ({ IBAN }: { IBAN: string }) => {
   const formattedIban = useMemo(() => printIbanFormat(IBAN), [IBAN]);
 
   return (
-    <CopyableRegularTextCell
+    <CopyableTextCell
       text={formattedIban}
       copyWording={t("copyButton.copyTooltip")}
       copiedWording={t("copyButton.copiedTooltip")}
@@ -76,16 +70,16 @@ const columns: ColumnConfig<Edge, ExtraInfo>[] = [
     width: "grow",
     id: "id",
     title: t("accountDetails.virtualIbans.iban"),
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { node } }) => <IbanCell IBAN={node.IBAN} />,
   },
   {
     width: 200,
     id: "bic",
     title: t("accountDetails.virtualIbans.bic"),
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { node } }) => (
-      <CopyableRegularTextCell
+      <CopyableTextCell
         text={node.BIC}
         copyWording={t("copyButton.copyTooltip")}
         copiedWording={t("copyButton.copiedTooltip")}
@@ -96,9 +90,9 @@ const columns: ColumnConfig<Edge, ExtraInfo>[] = [
     width: 180,
     id: "status",
     title: t("accountDetails.virtualIbans.status"),
-    renderTitle: ({ title }) => <SimpleHeaderCell justifyContent="flex-end" text={title} />,
+    renderTitle: ({ title }) => <HeaderCell align="right" text={title} />,
     renderCell: ({ item: { node } }) => (
-      <EndAlignedCell>
+      <Cell align="right">
         {match(node.status)
           .with("Enabled", () => (
             <Tag color="positive">{t("accountDetails.virtualIbans.status.enabled")}</Tag>
@@ -110,7 +104,7 @@ const columns: ColumnConfig<Edge, ExtraInfo>[] = [
             <Tag color="warning">{t("accountDetails.virtualIbans.status.suspended")}</Tag>
           ))
           .exhaustive()}
-      </EndAlignedCell>
+      </Cell>
     ),
   },
   {
@@ -118,8 +112,10 @@ const columns: ColumnConfig<Edge, ExtraInfo>[] = [
     id: "actions",
     title: "",
     renderTitle: () => null,
-    renderCell: ({ item: { node }, extraInfo: { reload } }) =>
-      node.status === "Enabled" ? <Actions virtualIbanId={node.id} onCancel={reload} /> : null,
+    renderCell: ({ item: { node }, extraInfo: { reload, canCancelVirtualIBAN } }) =>
+      node.status === "Enabled" && canCancelVirtualIBAN ? (
+        <Actions virtualIbanId={node.id} onCancel={reload} />
+      ) : null,
   },
 ];
 
@@ -128,16 +124,16 @@ const smallColumns: ColumnConfig<Edge, ExtraInfo>[] = [
     width: "grow",
     id: "id",
     title: t("accountDetails.virtualIbans.iban"),
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { node } }) => <IbanCell IBAN={node.IBAN} />,
   },
   {
     width: 180,
     id: "status",
     title: t("accountDetails.virtualIbans.status"),
-    renderTitle: ({ title }) => <SimpleHeaderCell justifyContent="flex-end" text={title} />,
+    renderTitle: ({ title }) => <HeaderCell align="right" text={title} />,
     renderCell: ({ item: { node } }) => (
-      <EndAlignedCell>
+      <Cell align="right">
         {match(node.status)
           .with("Enabled", () => (
             <Tag
@@ -161,7 +157,7 @@ const smallColumns: ColumnConfig<Edge, ExtraInfo>[] = [
             />
           ))
           .exhaustive()}
-      </EndAlignedCell>
+      </Cell>
     ),
   },
   {
@@ -176,16 +172,17 @@ const smallColumns: ColumnConfig<Edge, ExtraInfo>[] = [
 
 const Actions = ({ onCancel, virtualIbanId }: { onCancel: () => void; virtualIbanId: string }) => {
   const [modalVisible, setModalVisible] = useBoolean(false);
-  const [{ fetching }, cancelVirtualIban] = useMutation(CancelVirtualIbanDocument);
+  const [cancelVirtualIban, virtualIbanCancelation] = useMutation(CancelVirtualIbanDocument);
 
   const onPressCancel = () => {
     cancelVirtualIban({ virtualIbanId })
-      .then(parseOperationResult)
-      .then(data => data.cancelVirtualIbanEntry)
-      .then(filterRejectionsToPromise)
-      .then(onCancel)
-      .catch(error => showToast({ variant: "error", title: translateError(error) }))
-      .finally(setModalVisible.off);
+      .mapOkToResult(data => Option.fromNullable(data.cancelVirtualIbanEntry).toResult(undefined))
+      .mapOkToResult(filterRejectionsToResult)
+      .tapOk(onCancel)
+      .tapError((error: unknown) =>
+        showToast({ variant: "error", error, title: translateError(error) }),
+      )
+      .tap(setModalVisible.off);
   };
 
   return (
@@ -209,7 +206,12 @@ const Actions = ({ onCancel, virtualIbanId }: { onCancel: () => void; virtualIba
         <Space height={16} />
 
         <LakeButtonGroup paddingBottom={0}>
-          <LakeButton loading={fetching} grow={true} color="negative" onPress={onPressCancel}>
+          <LakeButton
+            loading={virtualIbanCancelation.isLoading()}
+            grow={true}
+            color="negative"
+            onPress={onPressCancel}
+          >
             {t("accountDetails.virtualIbans.cancelVirtualIban")}
           </LakeButton>
         </LakeButtonGroup>
@@ -220,112 +222,98 @@ const Actions = ({ onCancel, virtualIbanId }: { onCancel: () => void; virtualIba
 
 const keyExtractor = ({ node: { id } }: Edge) => id;
 
-export const AccountDetailsVirtualIbansPage = ({ accountId }: Props) => {
-  // use useResponsive to fit with scroll behavior set in AccountArea
-  const { desktop } = useResponsive();
-  const [{ fetching: adding }, addVirtualIban] = useMutation(AddVirtualIbanDocument);
+export const AccountDetailsVirtualIbansPage = ({ accountId, large }: Props) => {
+  const { canCreateVirtualIBAN, canCancelVirtualIBAN } = usePermissions();
+  const [addVirtualIban, virtualIbanAddition] = useMutation(AddVirtualIbanDocument);
 
-  const { data, nextData, reload, setAfter } = useUrqlPaginatedQuery(
-    {
-      query: AccountDetailsVirtualIbansPageDocument,
-      variables: { first: 20, accountId },
-    },
-    [accountId],
+  const [data, { isLoading, reload, setVariables }] = useQuery(
+    AccountDetailsVirtualIbansPageDocument,
+    { first: 20, accountId },
   );
 
   const onPressNew = () => {
     addVirtualIban({ accountId })
-      .then(parseOperationResult)
-      .then(data => data.addVirtualIbanEntry)
-      .then(data => data ?? Promise.reject())
-      .then(filterRejectionsToPromise)
-      .then(reload)
-      .catch(error => {
-        showToast({ variant: "error", title: translateError(error) });
+      .mapOkToResult(data => Option.fromNullable(data.addVirtualIbanEntry).toResult(undefined))
+      .mapOkToResult(filterRejectionsToResult)
+      .tapOk(reload)
+      .tapError((error: unknown) => {
+        showToast({ variant: "error", error, title: translateError(error) });
       });
   };
 
-  return (
-    <ResponsiveContainer style={styles.root} breakpoint={breakpoints.large}>
-      {({ large }) =>
-        data.match({
-          NotAsked: () => null,
-          Loading: () => (
-            <PlainListViewPlaceholder
-              headerHeight={48}
-              rowHeight={56}
-              rowVerticalSpacing={4}
-              count={20}
-            />
-          ),
-          Done: result =>
-            result.match({
-              Error: error => <ErrorView error={error} />,
-              Ok: data => {
-                const entries = data.account?.virtualIbanEntries;
-                const edges = entries?.edges ?? [];
-                const unlimited = data.account?.paymentLevel === "Unlimited";
+  return data.match({
+    NotAsked: () => null,
+    Loading: () => <PlainListViewPlaceholder headerHeight={48} rowHeight={56} count={20} />,
+    Done: result =>
+      result.match({
+        Error: error => <ErrorView error={error} />,
+        Ok: data => (
+          <Connection connection={data.account?.virtualIbanEntries}>
+            {virtualIbanEntries => {
+              const edges = virtualIbanEntries?.edges ?? [];
+              const totalCount = virtualIbanEntries?.totalCount ?? 0;
 
-                return (
-                  <>
-                    {edges.length > 0 && unlimited && (
-                      <View style={[styles.header, large && styles.headerDesktop]}>
-                        <LakeButton
-                          loading={adding}
-                          icon="add-circle-filled"
-                          size="small"
-                          color="current"
-                          onPress={onPressNew}
-                        >
-                          {t("common.new")}
-                        </LakeButton>
-                      </View>
+              return (
+                <>
+                  {canCreateVirtualIBAN && totalCount > 0 && (
+                    <View style={[styles.header, large && styles.headerDesktop]}>
+                      <LakeButton
+                        loading={virtualIbanAddition.isLoading()}
+                        icon="add-circle-filled"
+                        size="small"
+                        color="current"
+                        onPress={onPressNew}
+                      >
+                        {t("common.new")}
+                      </LakeButton>
+                    </View>
+                  )}
+
+                  <PlainListView
+                    withoutScroll={!large}
+                    data={edges}
+                    extraInfo={{ reload, canCancelVirtualIBAN }}
+                    columns={columns}
+                    smallColumns={smallColumns}
+                    keyExtractor={keyExtractor}
+                    onEndReached={() => {
+                      if (Boolean(virtualIbanEntries?.pageInfo.hasNextPage)) {
+                        setVariables({
+                          after: virtualIbanEntries?.pageInfo.endCursor ?? undefined,
+                        });
+                      }
+                    }}
+                    headerHeight={48}
+                    groupHeaderHeight={48}
+                    rowHeight={56}
+                    loading={{ isLoading, count: 20 }}
+                    renderEmptyList={() => (
+                      <EmptyView
+                        icon="add-circle-regular"
+                        title={t("accountDetails.virtualIbans.emptyTitle")}
+                        subtitle={t("accountDetails.virtualIbans.emptyDescription")}
+                      >
+                        {canCreateVirtualIBAN ? (
+                          <LakeButtonGroup justifyContent="center">
+                            <LakeButton
+                              loading={virtualIbanAddition.isLoading()}
+                              icon="add-circle-filled"
+                              size="small"
+                              color="current"
+                              onPress={onPressNew}
+                            >
+                              {t("common.new")}
+                            </LakeButton>
+                          </LakeButtonGroup>
+                        ) : null}
+                      </EmptyView>
                     )}
-
-                    <PlainListView
-                      withoutScroll={!desktop}
-                      data={edges}
-                      extraInfo={{ reload }}
-                      columns={columns}
-                      smallColumns={smallColumns}
-                      keyExtractor={keyExtractor}
-                      onEndReached={() => {
-                        if (Boolean(entries?.pageInfo.hasNextPage)) {
-                          setAfter(entries?.pageInfo.endCursor ?? undefined);
-                        }
-                      }}
-                      headerHeight={48}
-                      groupHeaderHeight={48}
-                      rowHeight={56}
-                      loading={{ isLoading: nextData.isLoading(), count: 20 }}
-                      renderEmptyList={() => (
-                        <FixedListViewEmpty
-                          icon="add-circle-regular"
-                          title={t("accountDetails.virtualIbans.emptyTitle")}
-                          subtitle={t("accountDetails.virtualIbans.emptyDescription")}
-                        >
-                          {unlimited && (
-                            <LakeButtonGroup justifyContent="center">
-                              <LakeButton
-                                loading={adding}
-                                icon="add-circle-filled"
-                                size="small"
-                                color="current"
-                                onPress={onPressNew}
-                              >
-                                {t("common.new")}
-                              </LakeButton>
-                            </LakeButtonGroup>
-                          )}
-                        </FixedListViewEmpty>
-                      )}
-                    />
-                  </>
-                );
-              },
-            }),
-        })
-      }
-    </ResponsiveContainer>
-  );
+                  />
+                </>
+              );
+            }}
+          </Connection>
+        ),
+      }),
+  });
 };

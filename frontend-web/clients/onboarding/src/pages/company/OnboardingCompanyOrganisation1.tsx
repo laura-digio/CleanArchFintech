@@ -1,3 +1,5 @@
+import { Option } from "@swan-io/boxed";
+import { useDeferredQuery, useMutation } from "@swan-io/graphql-client";
 import { LakeAlert } from "@swan-io/lake/src/components/LakeAlert";
 import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
@@ -6,21 +8,24 @@ import { RadioGroup } from "@swan-io/lake/src/components/RadioGroup";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints, negativeSpacings } from "@swan-io/lake/src/constants/design";
 import { useFirstMountState } from "@swan-io/lake/src/hooks/useFirstMountState";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
 import { noop } from "@swan-io/lake/src/utils/function";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { emptyToUndefined } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToResult, parseOperationResult } from "@swan-io/lake/src/utils/urql";
-import { AddressFormPart } from "@swan-io/shared-business/src/components/AddressFormPart";
+import { omit } from "@swan-io/lake/src/utils/object";
+import { trim } from "@swan-io/lake/src/utils/string";
+import {
+  AddressDetail,
+  PlacekitAddressSearchInput,
+} from "@swan-io/shared-business/src/components/PlacekitAddressSearchInput";
 import { TaxIdentificationNumberInput } from "@swan-io/shared-business/src/components/TaxIdentificationNumberInput";
 import { CountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { validateCompanyTaxNumber } from "@swan-io/shared-business/src/utils/validation";
-import { useCallback, useEffect } from "react";
+import { combineValidators, useForm } from "@swan-io/use-form";
+import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { combineValidators, hasDefinedKeys, useForm } from "react-ux-form";
 import { match } from "ts-pattern";
 import { LakeCompanyInput } from "../../components/LakeCompanyInput";
 import { OnboardingFooter } from "../../components/OnboardingFooter";
@@ -35,13 +40,11 @@ import {
 import { CompanySuggestion } from "../../utils/Pappers";
 import { env } from "../../utils/env";
 import { locale, t } from "../../utils/i18n";
-import { logFrontendError } from "../../utils/logger";
 import { CompanyOnboardingRoute, Router } from "../../utils/routes";
 import {
   getRegistrationNumberName,
   getUpdateOnboardingError,
 } from "../../utils/templateTranslations";
-import { unauthenticatedClient } from "../../utils/urql";
 import {
   ServerInvalidFieldCode,
   extractServerValidationErrors,
@@ -88,16 +91,20 @@ type Props = {
 };
 
 const associationRegisterNamePerCountry: Partial<Record<CountryCCA3, string>> = {
-  FRA: "RCS/JOAFE",
+  FRA: "Journal officiel des associations JOAFE",
+};
+
+const selfEmployedRegisterNamePerCountry: Partial<Record<CountryCCA3, string>> = {
+  FRA: "Registre du Commerce et des Sociétés (RCS) or INSEE",
 };
 
 const registerNamePerCountry: Partial<Record<CountryCCA3, string>> = {
-  BEL: "“Code des sociétés”",
+  BEL: "Code des Sociétés et des Associations (CSA)",
   DEU: "Handelsregister",
   FRA: "Registre du Commerce et des Sociétés (RCS)",
   ITA: "Registro Imprese",
   NLD: "Handelsregister",
-  ESP: "Registradores de España",
+  ESP: "Registro Mercantil",
 };
 
 export const OnboardingCompanyOrganisation1 = ({
@@ -117,67 +124,67 @@ export const OnboardingCompanyOrganisation1 = ({
   onboardingId,
   serverValidationErrors,
 }: Props) => {
-  const [updateResult, updateOnboarding] = useUrqlMutation(UpdateCompanyOnboardingDocument);
+  const [updateOnboarding, updateResult] = useMutation(UpdateCompanyOnboardingDocument);
   const isFirstMount = useFirstMountState();
   const canSetTaxIdentification = match({ accountCountry, country })
     .with({ accountCountry: "DEU", country: "DEU" }, () => true)
     .with({ accountCountry: "ESP", country: "ESP" }, () => true)
+    .with({ accountCountry: "ITA", country: "ITA" }, () => true)
     .otherwise(() => false);
   const isTaxIdentificationRequired = match({ accountCountry, country })
     .with({ accountCountry: "ESP", country: "ESP" }, () => true)
+    .with({ accountCountry: "ITA", country: "ITA" }, () => true)
     .otherwise(() => false);
 
-  const { Field, FieldsListener, submitForm, setFieldValue, listenFields, setFieldError } = useForm(
-    {
-      isRegistered: {
-        initialValue: initialIsRegistered,
-        validate: validateRequiredBoolean,
-      },
-      name: {
-        initialValue: initialName,
-        validate: validateRequired,
-        sanitize: value => value.trim(),
-      },
-      registrationNumber: {
-        initialValue: initialRegistrationNumber,
-        validate: (value, { getFieldState }) => {
-          const isRegistered = getFieldState("isRegistered").value;
-          return isRegistered === true ? validateRequired(value) : undefined;
-        },
-        sanitize: value => value.trim(),
-      },
-      vatNumber: {
-        initialValue: initialVatNumber,
-        validate: validateVatNumber,
-        sanitize: value => value.trim(),
-      },
-      taxIdentificationNumber: {
-        initialValue: initialTaxIdentificationNumber,
-        validate: canSetTaxIdentification
-          ? combineValidators(
-              isTaxIdentificationRequired && validateRequired,
-              validateCompanyTaxNumber(accountCountry),
-            )
-          : undefined,
-        sanitize: value => value.trim(),
-      },
-      address: {
-        initialValue: initialAddressLine1,
-        validate: validateRequired,
-        sanitize: value => value.trim(),
-      },
-      city: {
-        initialValue: initialCity,
-        validate: validateRequired,
-        sanitize: value => value.trim(),
-      },
-      postalCode: {
-        initialValue: initialPostalCode,
-        validate: validateRequired,
-        sanitize: value => value.trim(),
+  const { Field, FieldsListener, submitForm, setFieldValue, setFieldError } = useForm({
+    isRegistered: {
+      initialValue: initialIsRegistered,
+      validate: validateRequiredBoolean,
+    },
+    name: {
+      initialValue: initialName,
+      sanitize: trim,
+      validate: validateRequired,
+    },
+    registrationNumber: {
+      initialValue: initialRegistrationNumber,
+      sanitize: trim,
+      validate: (value, { getFieldValue }) => {
+        const isRegistered = getFieldValue("isRegistered");
+        return isRegistered === true ? validateRequired(value) : undefined;
       },
     },
-  );
+    vatNumber: {
+      initialValue: initialVatNumber,
+      sanitize: trim,
+      validate: validateVatNumber,
+    },
+    taxIdentificationNumber: {
+      initialValue: initialTaxIdentificationNumber,
+      sanitize: trim,
+      validate: canSetTaxIdentification
+        ? combineValidators(
+            isTaxIdentificationRequired && validateRequired,
+            validateCompanyTaxNumber(accountCountry),
+          )
+        : undefined,
+    },
+    address: {
+      initialValue: initialAddressLine1,
+      sanitize: trim,
+      validate: validateRequired,
+    },
+    city: {
+      initialValue: initialCity,
+      sanitize: trim,
+      validate: validateRequired,
+    },
+    postalCode: {
+      initialValue: initialPostalCode,
+      sanitize: trim,
+      validate: validateRequired,
+    },
+  });
 
   useEffect(() => {
     if (isFirstMount) {
@@ -193,123 +200,133 @@ export const OnboardingCompanyOrganisation1 = ({
   };
 
   const onPressNext = () => {
-    submitForm(values => {
-      if (
-        !hasDefinedKeys(values, [
-          "isRegistered",
-          "name",
-          "registrationNumber",
-          "vatNumber",
-          "address",
-          "city",
-          "postalCode",
-        ])
-      ) {
-        return;
-      }
-      const {
-        isRegistered,
-        name,
-        registrationNumber,
-        vatNumber,
-        taxIdentificationNumber,
-        address,
-        city,
-        postalCode,
-      } = values;
+    submitForm({
+      onSuccess: values => {
+        const option = Option.allFromDict(omit(values, ["taxIdentificationNumber"]));
 
-      updateOnboarding({
-        input: {
-          onboardingId,
-          isRegistered,
-          name,
-          registrationNumber,
-          vatNumber: emptyToUndefined(vatNumber),
-          taxIdentificationNumber: emptyToUndefined(taxIdentificationNumber ?? ""),
-          residencyAddress: {
-            addressLine1: address,
-            city,
-            postalCode,
+        if (option.isNone()) {
+          return;
+        }
+
+        const taxIdentificationNumber = values.taxIdentificationNumber
+          .flatMap(value => Option.fromUndefined(emptyToUndefined(value)))
+          .toUndefined();
+
+        const currentValues = {
+          ...option.get(),
+          taxIdentificationNumber,
+        };
+
+        const { isRegistered, name, registrationNumber, vatNumber, address, city, postalCode } =
+          currentValues;
+
+        updateOnboarding({
+          input: {
+            onboardingId,
+            isRegistered,
+            name,
+            registrationNumber,
+            vatNumber: emptyToUndefined(vatNumber),
+            taxIdentificationNumber,
+            residencyAddress: {
+              addressLine1: address,
+              city,
+              postalCode,
+            },
+            language: locale.language,
           },
           language: locale.language,
-        },
-        language: locale.language,
-      })
-        .mapOk(data => data.unauthenticatedUpdateCompanyOnboarding)
-        .mapOkToResult(filterRejectionsToResult)
-        .tapOk(() => Router.push(nextStep, { onboardingId }))
-        .tapError(error => {
-          match(error)
-            .with({ __typename: "ValidationRejection" }, error => {
-              const invalidFields = extractServerValidationErrors(error, path =>
-                match(path)
-                  .with(["registrationNumber"] as const, ([fieldName]) => fieldName)
-                  .with(["vatNumber"] as const, ([fieldName]) => fieldName)
-                  .with(["taxIdentificationNumber"] as const, ([fieldName]) => fieldName)
-                  .with(["residencyAddress", "addressLine1"], () => "address" as const)
-                  .with(["residencyAddress", "city"] as const, ([, fieldName]) => fieldName)
-                  .with(["residencyAddress", "postalCode"] as const, ([, fieldName]) => fieldName)
-                  .otherwise(() => null),
-              );
-              invalidFields.forEach(({ fieldName, code }) => {
-                const message = getValidationErrorMessage(code, values[fieldName]);
-                setFieldError(fieldName, message);
-              });
-            })
-            .otherwise(noop);
+        })
+          .mapOk(data => data.unauthenticatedUpdateCompanyOnboarding)
+          .mapOkToResult(filterRejectionsToResult)
+          .tapOk(() => Router.push(nextStep, { onboardingId }))
+          .tapError(error => {
+            match(error)
+              .with({ __typename: "ValidationRejection" }, error => {
+                const invalidFields = extractServerValidationErrors(error, path =>
+                  match(path)
+                    .with(["registrationNumber"] as const, ([fieldName]) => fieldName)
+                    .with(["vatNumber"] as const, ([fieldName]) => fieldName)
+                    .with(["taxIdentificationNumber"] as const, ([fieldName]) => fieldName)
+                    .with(["residencyAddress", "addressLine1"], () => "address" as const)
+                    .with(["residencyAddress", "city"] as const, ([, fieldName]) => fieldName)
+                    .with(["residencyAddress", "postalCode"] as const, ([, fieldName]) => fieldName)
+                    .otherwise(() => null),
+                );
+                invalidFields.forEach(({ fieldName, code }) => {
+                  const message = getValidationErrorMessage(code, currentValues[fieldName]);
+                  setFieldError(fieldName, message);
+                });
+              })
+              .otherwise(noop);
 
-          const errorMessage = getUpdateOnboardingError(error);
-          showToast({
-            variant: "error",
-            title: errorMessage.title,
-            description: errorMessage.description,
+            showToast({ variant: "error", error, ...getUpdateOnboardingError(error) });
           });
-        });
+      },
     });
   };
 
-  const onSelectCompany = useCallback(
-    (suggestion: CompanySuggestion) => {
-      // once a company is selected from auto-completion, we query our API to get some information not available with auto-completion
-      unauthenticatedClient
-        .query(
-          GetCompanyInfoDocument,
-          { siren: suggestion.siren },
-          { requestPolicy: "network-only" },
-        )
-        .toPromise()
-        .then(parseOperationResult)
-        .then(({ companyInfoBySiren }) => {
-          if (companyInfoBySiren.__typename !== "CompanyInfoBySirenSuccessPayload") {
-            throw new Error(companyInfoBySiren.__typename);
-          }
+  const [siren, setSiren] = useState<string>();
 
-          const { companyName, siren, headquarters, vatNumber } = companyInfoBySiren.companyInfo;
+  const [data, { query }] = useDeferredQuery(GetCompanyInfoDocument);
 
-          setFieldValue("name", companyName);
+  useEffect(() => {
+    if (siren != null) {
+      const request = query({ siren });
+      return () => request.cancel();
+    }
+  }, [siren, query]);
+
+  const companyInfo = data
+    .toOption()
+    .flatMap(result => result.toOption())
+    .map(companyInfo => companyInfo.companyInfoBySiren)
+    .toUndefined();
+
+  useEffect(() => {
+    match(companyInfo)
+      .with({ __typename: "CompanyInfoBySirenSuccessPayload" }, ({ companyInfo }) => {
+        const { companyName, siren, headquarters, vatNumber } = companyInfo;
+
+        setFieldValue("name", companyName);
+        setFieldValue("registrationNumber", siren);
+        setFieldValue("vatNumber", vatNumber ?? "");
+        setFieldValue("address", headquarters.address);
+        setFieldValue("city", headquarters.town);
+        setFieldValue("postalCode", headquarters.zipCode);
+      })
+      .otherwise(() => {
+        if (siren != null) {
           setFieldValue("registrationNumber", siren);
-          setFieldValue("vatNumber", vatNumber ?? "");
-          setFieldValue("address", headquarters.address);
-          setFieldValue("city", headquarters.town);
-          setFieldValue("postalCode", headquarters.zipCode);
-        })
-        .catch(() => {
-          // if request to get company info fail, we fill with info from auto completion
-          setFieldValue("registrationNumber", suggestion.siren);
-        });
+        }
+      });
+  }, [companyInfo, setFieldValue, siren]);
+
+  const onSelectCompany = useCallback(({ siren }: CompanySuggestion) => {
+    setSiren(siren);
+  }, []);
+
+  const countryRegisterName = match(companyType)
+    .with("Association", () => associationRegisterNamePerCountry[country])
+    .with("SelfEmployed", () => selfEmployedRegisterNamePerCountry[country])
+    .otherwise(() => registerNamePerCountry[country]);
+
+  const onSuggestion = useCallback(
+    (place: AddressDetail) => {
+      setFieldValue("address", place.completeAddress);
+      setFieldValue("city", place.city);
+      if (place.postalCode != null) {
+        setFieldValue("postalCode", place.postalCode);
+      }
     },
     [setFieldValue],
   );
 
-  const countryRegisterName = match(companyType)
-    .with("Association", () => associationRegisterNamePerCountry[country])
-    .otherwise(() => registerNamePerCountry[country]);
-
   return (
     <>
       <OnboardingStepContent>
-        <ResponsiveContainer breakpoint={breakpoints.medium} style={commonStyles.fillNoShrink}>
-          {({ small, large }) => (
+        <ResponsiveContainer breakpoint={breakpoints.medium}>
+          {({ small }) => (
             <>
               <StepTitle isMobile={small}>{t("company.step.organisation1.title")}</StepTitle>
               <Space height={small ? 24 : 32} />
@@ -338,7 +355,12 @@ export const OnboardingCompanyOrganisation1 = ({
                       render={() => (
                         <>
                           <LakeText variant="smallRegular" style={styles.registrationHelp}>
-                            {t("company.step.organisation1.isRegisteredLabel.description")}
+                            {t("company.step.organisation1.isRegisteredLabel.description", {
+                              registrationNumberLegalName: getRegistrationNumberName(
+                                country,
+                                companyType,
+                              ),
+                            })}
                           </LakeText>
 
                           <Space height={8} />
@@ -375,7 +397,7 @@ export const OnboardingCompanyOrganisation1 = ({
                             error={error}
                             onValueChange={onChange}
                             onSuggestion={onSelectCompany}
-                            onLoadError={logFrontendError}
+                            onLoadError={noop}
                           />
                         ) : (
                           <LakeTextInput
@@ -479,24 +501,72 @@ export const OnboardingCompanyOrganisation1 = ({
               <Space height={small ? 24 : 32} />
 
               <Tile>
-                <AddressFormPart
-                  initialAddress={initialAddressLine1}
-                  initialCity={initialCity}
-                  initialPostalCode={initialPostalCode}
-                  country={country}
-                  label={t("company.step.organisation1.addressLabel")}
-                  Field={Field}
-                  setFieldValue={setFieldValue}
-                  listenFields={listenFields}
-                  isLarge={large}
-                  apiKey={env.PLACEKIT_API_KEY}
-                />
+                <Field name="address">
+                  {({ ref, value, onChange, error }) => (
+                    <LakeLabel
+                      label={t("company.step.organisation1.addressLabel")}
+                      render={id => (
+                        <PlacekitAddressSearchInput
+                          inputRef={ref}
+                          apiKey={env.PLACEKIT_API_KEY}
+                          emptyResultText={t("common.noResult")}
+                          placeholder={t("company.step.organisation1.addressPlaceholder")}
+                          language={locale.language}
+                          id={id}
+                          country={country}
+                          value={value}
+                          error={error}
+                          onValueChange={onChange}
+                          onSuggestion={onSuggestion}
+                        />
+                      )}
+                    />
+                  )}
+                </Field>
+
+                <Space height={12} />
+
+                <Field name="city">
+                  {({ ref, value, valid, error, onChange }) => (
+                    <LakeLabel
+                      label={t("company.step.organisation1.cityLabel")}
+                      render={id => (
+                        <LakeTextInput
+                          ref={ref}
+                          id={id}
+                          value={value}
+                          valid={valid}
+                          error={error}
+                          onChangeText={onChange}
+                        />
+                      )}
+                    />
+                  )}
+                </Field>
+
+                <Space height={12} />
+
+                <Field name="postalCode">
+                  {({ ref, value, valid, error, onChange }) => (
+                    <LakeLabel
+                      label={t("company.step.organisation1.postCodeLabel")}
+                      render={id => (
+                        <LakeTextInput
+                          ref={ref}
+                          id={id}
+                          value={value}
+                          valid={valid}
+                          error={error}
+                          onChangeText={onChange}
+                        />
+                      )}
+                    />
+                  )}
+                </Field>
               </Tile>
             </>
           )}
         </ResponsiveContainer>
-
-        <Space height={24} />
 
         <OnboardingFooter
           onPrevious={onPressPrevious}

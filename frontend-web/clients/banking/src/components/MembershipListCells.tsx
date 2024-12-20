@@ -1,11 +1,6 @@
 import { Box } from "@swan-io/lake/src/components/Box";
+import { Cell, CopyableTextCell, TextCell } from "@swan-io/lake/src/components/Cells";
 import { Fill } from "@swan-io/lake/src/components/Fill";
-import {
-  CellAction,
-  CopyableRegularTextCell,
-  EndAlignedCell,
-  SimpleRegularTextCell,
-} from "@swan-io/lake/src/components/FixedListViewCells";
 import { Icon, IconName } from "@swan-io/lake/src/components/Icon";
 import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
 import { LakeText } from "@swan-io/lake/src/components/LakeText";
@@ -13,7 +8,6 @@ import { LakeTooltip } from "@swan-io/lake/src/components/LakeTooltip";
 import { Pressable } from "@swan-io/lake/src/components/Pressable";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tag } from "@swan-io/lake/src/components/Tag";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { colors, spacings } from "@swan-io/lake/src/constants/design";
 import { StyleSheet, View } from "react-native";
 import { P, match } from "ts-pattern";
@@ -24,21 +18,9 @@ import { t } from "../utils/i18n";
 type AccountMembership = AccountMembershipFragment;
 
 const styles = StyleSheet.create({
-  cell: {
-    display: "flex",
-    paddingHorizontal: spacings[16],
-    flexGrow: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    width: 1,
-  },
   paddedCell: {
     paddingVertical: spacings[12],
-  },
-  name: {
-    ...commonStyles.fill,
-    flexDirection: "row",
-    alignItems: "center",
+    minHeight: 72,
   },
   rightsIcon: {
     marginHorizontal: spacings[4],
@@ -47,7 +29,6 @@ const styles = StyleSheet.create({
     width: 1,
     alignSelf: "stretch",
     backgroundColor: colors.gray[200],
-    height: 28,
     marginHorizontal: spacings[4],
   },
   notificationPill: {
@@ -173,7 +154,7 @@ const getRightsTag = ({ accountMembership }: { accountMembership: AccountMembers
 
           <PermissionLine
             iconName="lake-card-add"
-            isAuthorized={accountMembership.canManageAccountMembership}
+            isAuthorized={accountMembership.canManageCards}
             authorizedMessage={t("members.permission.canManageCards")}
             notAuthorizedMessage={t("members.permission.not.canManageCards")}
           />
@@ -272,49 +253,59 @@ export const FullNameAndStatusCell = ({
   accountMembership: AccountMembership;
 }) => {
   return (
-    <View style={styles.cell}>
-      <View style={styles.name}>
-        <LakeHeading variant="h5" level={3}>
-          {getMemberName({ accountMembership })}
-        </LakeHeading>
+    <Cell>
+      <LakeHeading variant="h5" level={3} numberOfLines={1}>
+        {getMemberName({ accountMembership })}
+      </LakeHeading>
 
-        <Space width={16} />
+      <Space width={16} />
 
-        {match(accountMembership.statusInfo)
-          .with({ __typename: "AccountMembershipEnabledStatusInfo" }, () => (
-            <Tag color="positive">{t("memberships.status.active")}</Tag>
-          ))
-          .with(
-            {
+      {match(accountMembership)
+        .with({ statusInfo: { __typename: "AccountMembershipEnabledStatusInfo" } }, () => (
+          <Tag color="positive">{t("memberships.status.active")}</Tag>
+        ))
+        .with(
+          {
+            statusInfo: {
               __typename: "AccountMembershipBindingUserErrorStatusInfo",
               idVerifiedMatchError: true,
             },
-            () => (
-              <>
-                <Tag color="warning">{t("memberships.status.limitedAccess")}</Tag>
-              </>
-            ),
-          )
-          .with({ __typename: "AccountMembershipBindingUserErrorStatusInfo" }, () => (
+          },
+          {
+            statusInfo: {
+              __typename: "AccountMembershipBindingUserErrorStatusInfo",
+              emailVerifiedMatchError: true,
+            },
+            user: { verifiedEmails: [] },
+          },
+          () => (
             <>
-              <Tag color="negative">{t("memberships.status.conflict")}</Tag>
-              <Space width={16} />
-              <View style={styles.notificationPill} />
+              <Tag color="warning">{t("memberships.status.limitedAccess")}</Tag>
             </>
-          ))
-          .with({ __typename: "AccountMembershipInvitationSentStatusInfo" }, () => (
-            <Tag color="shakespear">{t("memberships.status.invitationSent")}</Tag>
-          ))
-          .with({ __typename: "AccountMembershipSuspendedStatusInfo" }, () => (
-            <Tag color="warning">{t("memberships.status.temporarilyBlocked")}</Tag>
-          ))
-          .with({ __typename: "AccountMembershipDisabledStatusInfo" }, () => (
-            <Tag color="gray">{t("memberships.status.permanentlyBlocked")}</Tag>
-          ))
-          .with({ __typename: "AccountMembershipConsentPendingStatusInfo" }, () => null)
-          .exhaustive()}
-      </View>
-    </View>
+          ),
+        )
+        .with({ statusInfo: { __typename: "AccountMembershipBindingUserErrorStatusInfo" } }, () => (
+          <>
+            <Tag color="negative">{t("memberships.status.conflict")}</Tag>
+            <Space width={16} />
+            <View style={styles.notificationPill} />
+          </>
+        ))
+        .with({ statusInfo: { __typename: "AccountMembershipInvitationSentStatusInfo" } }, () => (
+          <Tag color="shakespear">{t("memberships.status.invitationSent")}</Tag>
+        ))
+        .with({ statusInfo: { __typename: "AccountMembershipSuspendedStatusInfo" } }, () => (
+          <Tag color="warning">{t("memberships.status.temporarilyBlocked")}</Tag>
+        ))
+        .with({ statusInfo: { __typename: "AccountMembershipDisabledStatusInfo" } }, () => (
+          <Tag color="gray">{t("memberships.status.permanentlyBlocked")}</Tag>
+        ))
+        .with(
+          { statusInfo: { __typename: "AccountMembershipConsentPendingStatusInfo" } },
+          () => null,
+        )
+        .exhaustive()}
+    </Cell>
   );
 };
 
@@ -324,36 +315,31 @@ export const MembershipSummaryCell = ({
   accountMembership: AccountMembership;
 }) => {
   return (
-    <View style={[styles.cell, styles.paddedCell]}>
-      <View style={styles.name}>
-        <View>
-          <LakeHeading variant="h5" level={3}>
-            {getMemberName({ accountMembership })}
-          </LakeHeading>
+    <Cell style={styles.paddedCell}>
+      <Box grow={1} shrink={1}>
+        <LakeHeading variant="h5" level={3}>
+          {getMemberName({ accountMembership })}
+        </LakeHeading>
 
-          <Space height={8} />
+        <Space height={8} />
 
-          {getRightsTag({ accountMembership })}
-        </View>
+        {getRightsTag({ accountMembership })}
+      </Box>
 
-        <Fill minWidth={16} />
+      <Fill minWidth={16} />
 
-        {getStatusIcon({ accountMembership })}
-
-        <Space width={8} />
-        <Icon name="chevron-right-filled" color={colors.gray[200]} size={16} />
-      </View>
-    </View>
+      {getStatusIcon({ accountMembership })}
+    </Cell>
   );
 };
 
 export const RightsCell = ({ accountMembership }: { accountMembership: AccountMembership }) => {
-  return <View style={styles.cell}>{getRightsTag({ accountMembership })}</View>;
+  return <Cell>{getRightsTag({ accountMembership })}</Cell>;
 };
 
 export const EmailCell = ({ accountMembership }: { accountMembership: AccountMembership }) => {
   return (
-    <CopyableRegularTextCell
+    <CopyableTextCell
       variant="smallMedium"
       text={accountMembership.email}
       copyWording={t("copyButton.copyTooltip")}
@@ -381,14 +367,16 @@ export const PhoneNumberCell = ({
         statusInfo: {
           restrictedTo: { phoneNumber },
         },
-      }) => phoneNumber,
+      }) => phoneNumber ?? "—",
     )
     .otherwise(() => accountMembership.user?.mobilePhoneNumber);
+
   if (mobilePhoneNumber == null) {
-    return <SimpleRegularTextCell text={"-"} variant="smallRegular" />;
+    return <TextCell text={"-"} variant="smallRegular" />;
   }
+
   return (
-    <CopyableRegularTextCell
+    <CopyableTextCell
       variant="smallMedium"
       text={mobilePhoneNumber}
       copyWording={t("copyButton.copyTooltip")}
@@ -409,60 +397,46 @@ export const MembershipActionsCell = ({
   onPressCancel: ({ accountMembershipId }: { accountMembershipId: string }) => void;
 }) => {
   return (
-    <EndAlignedCell>
-      <CellAction>
-        <Box direction="row" justifyContent="end" alignItems="center">
-          {match({
-            accountMembership,
-            isCurrentUserMembership: currentUserAccountMembershipId === accountMembership.id,
-          })
-            .with(
-              {
-                accountMembership: {
-                  statusInfo: { __typename: P.not("AccountMembershipDisabledStatusInfo") },
-                  legalRepresentative: P.not(true),
-                },
-                isCurrentUserMembership: false,
-              },
-              ({ accountMembership: { id: accountMembershipId } }) => (
-                <>
-                  <Pressable
-                    onPress={event => {
-                      event.stopPropagation();
-                      event.preventDefault();
-                      onPressCancel({ accountMembershipId });
-                    }}
-                  >
-                    {({ hovered }) => (
-                      <Icon
-                        name="subtract-circle-regular"
-                        color={
-                          hovered
-                            ? colors.negative[500]
-                            : isRowHovered
-                              ? colors.gray[700]
-                              : colors.gray[500]
-                        }
-                        size={16}
-                      />
-                    )}
-                  </Pressable>
-
-                  <Space width={8} />
-                </>
-              ),
-            )
-            .otherwise(() => (
-              <Space width={24} />
-            ))}
-
-          <Icon
-            name="chevron-right-filled"
-            color={isRowHovered ? colors.gray[900] : colors.gray[500]}
-            size={16}
-          />
-        </Box>
-      </CellAction>
-    </EndAlignedCell>
+    <Cell align="right">
+      {match({
+        accountMembership,
+        isCurrentUserMembership: currentUserAccountMembershipId === accountMembership.id,
+      })
+        .with(
+          {
+            accountMembership: {
+              statusInfo: { __typename: P.not("AccountMembershipDisabledStatusInfo") },
+              legalRepresentative: P.not(true),
+            },
+            isCurrentUserMembership: false,
+          },
+          ({ accountMembership: { id: accountMembershipId } }) => (
+            <Pressable
+              onPress={event => {
+                event.stopPropagation();
+                event.preventDefault();
+                onPressCancel({ accountMembershipId });
+              }}
+            >
+              {({ hovered }) => (
+                <Icon
+                  name="subtract-circle-regular"
+                  color={
+                    hovered
+                      ? colors.negative[500]
+                      : isRowHovered
+                        ? colors.gray[700]
+                        : colors.gray[500]
+                  }
+                  size={16}
+                />
+              )}
+            </Pressable>
+          ),
+        )
+        .otherwise(() => (
+          <Space width={24} />
+        ))}
+    </Cell>
   );
 };

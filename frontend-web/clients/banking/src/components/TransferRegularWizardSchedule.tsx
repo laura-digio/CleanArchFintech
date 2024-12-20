@@ -1,4 +1,5 @@
-import { AsyncData, Result } from "@swan-io/boxed";
+import { AsyncData, Option, Result } from "@swan-io/boxed";
+import { useDeferredQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { LakeAlert } from "@swan-io/lake/src/components/LakeAlert";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
@@ -12,12 +13,13 @@ import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { animations, colors } from "@swan-io/lake/src/constants/design";
-import { useUrqlQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
+import { useBoolean } from "@swan-io/lake/src/hooks/useBoolean";
 import { DatePicker, isDateInRange } from "@swan-io/shared-business/src/components/DatePicker";
+import { combineValidators, useForm } from "@swan-io/use-form";
 import dayjs from "dayjs";
 import { electronicFormat } from "iban";
+import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { combineValidators, useForm } from "react-ux-form";
 import { Rifm } from "rifm";
 import { P, match } from "ts-pattern";
 import { GetIbanValidationDocument } from "../graphql/partner";
@@ -28,8 +30,7 @@ import {
   validateTime,
   validateTodayOrAfter,
 } from "../utils/validations";
-import { ErrorView } from "./ErrorView";
-import { Beneficiary } from "./TransferWizardBeneficiary";
+import { SepaBeneficiary } from "./BeneficiarySepaWizardForm";
 
 const styles = StyleSheet.create({
   field: {
@@ -56,7 +57,7 @@ export type Schedule =
 type Props = {
   onPressPrevious: () => void;
   onSave: (schedule: Schedule) => void;
-  beneficiary: Beneficiary;
+  beneficiary?: SepaBeneficiary;
   loading: boolean;
 };
 
@@ -71,32 +72,29 @@ export const TransferRegularWizardSchedule = ({
   onSave,
   loading,
 }: Props) => {
-  const { data } = useUrqlQuery(
-    {
-      query: GetIbanValidationDocument,
-      variables: {
-        iban: electronicFormat(beneficiary.iban),
-      },
-    },
-    [beneficiary.iban],
-  );
+  const [isScheduled, setIsScheduled] = useBoolean(false);
+  const [isInstant, setIsInstant] = useBoolean(true);
+  const [data, { query }] = useDeferredQuery(GetIbanValidationDocument);
 
-  const { Field, FieldsListener, submitForm } = useForm({
-    isScheduled: {
-      initialValue: false,
-    },
+  useEffect(() => {
+    if (beneficiary != null) {
+      query({ iban: electronicFormat(beneficiary.iban) });
+    }
+  }, [beneficiary, query]);
+
+  const { Field, submitForm } = useForm({
     scheduledDate: {
       initialValue: "",
       validate: combineValidators(validateTodayOrAfter, validateDateWithinNextYear),
     },
     scheduledTime: {
       initialValue: "",
-      validate: (value, { getFieldState }) => {
+      validate: (value, { getFieldValue }) => {
         if (value === "") {
           return t("common.form.required");
         }
 
-        const date = getFieldState("scheduledDate").value;
+        const date = getFieldValue("scheduledDate");
         const isScheduleToday = isToday(date);
         const minHours = isScheduleToday ? new Date().getHours() : 0;
         const minMinutes = isScheduleToday ? new Date().getMinutes() : 0;
@@ -104,196 +102,170 @@ export const TransferRegularWizardSchedule = ({
         return validateTime(minHours, minMinutes)(value);
       },
     },
-    isInstant: {
-      initialValue: true,
-    },
   });
 
   const onPressSubmit = () => {
-    submitForm(values => {
-      match(values)
-        .with(
-          { isScheduled: true, scheduledDate: P.string, scheduledTime: P.string },
-          ({ scheduledDate, scheduledTime }) => {
-            onSave({ isScheduled: true, scheduledDate, scheduledTime });
-          },
-        )
-        .with({ isInstant: P.boolean }, ({ isInstant }) => {
-          onSave({ isScheduled: false, isInstant });
+    submitForm({
+      onSuccess: values => {
+        match({
+          isScheduled,
+          isInstant,
+          option: Option.allFromDict(values),
         })
-        .otherwise(() => {
-          onSave({ isScheduled: false, isInstant: false });
-        });
+          .with(
+            { isScheduled: true, option: Option.P.Some(P.select()) },
+            ({ scheduledDate, scheduledTime }) => {
+              onSave({ isScheduled: true, scheduledDate, scheduledTime });
+            },
+          )
+          .with({ isInstant: P.boolean }, ({ isInstant }) => {
+            onSave({ isScheduled: false, isInstant });
+          })
+          .otherwise(() => {
+            onSave({ isScheduled: false, isInstant: false });
+          });
+      },
     });
   };
 
   return (
     <>
-      {match(data)
-        .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => (
-          <ActivityIndicator color={colors.gray[900]} />
-        ))
-        .with(AsyncData.P.Done(Result.P.Ok(P.select())), data => {
-          return (
-            <>
-              <Tile
-                style={animations.fadeAndSlideInFromBottom.enter}
-                footer={
-                  <FieldsListener names={["isScheduled"]}>
-                    {({ isScheduled }) =>
-                      isScheduled.value
-                        ? null
-                        : match(data.ibanValidation)
-                            .with(INSTANT_CREDIT_TRANSFER_AVAILABLE_PATTERN, () => null)
-                            .otherwise(() => (
-                              <LakeAlert
-                                anchored={true}
-                                variant="info"
-                                title={t(
-                                  "transfer.new.schedule.instantCreditTransfer.notAvailable",
-                                )}
-                              >
-                                <LakeText>
-                                  {t(
-                                    "transfer.new.schedule.instantCreditTransfer.notAvailableDescription",
-                                  )}
-                                </LakeText>
-                              </LakeAlert>
-                            ))
-                    }
-                  </FieldsListener>
-                }
-              >
-                <LakeLabel
-                  label={t("transfer.new.schedule.label")}
-                  type="radioGroup"
-                  render={() => (
-                    <Field name="isScheduled">
-                      {({ value, onChange }) => (
-                        <RadioGroup
-                          disabled={loading}
-                          direction="row"
-                          items={scheduleItems}
-                          value={value}
-                          onValueChange={onChange}
-                        />
-                      )}
-                    </Field>
-                  )}
-                />
+      <Tile
+        style={animations.fadeAndSlideInFromBottom.enter}
+        footer={match(data)
+          .with(AsyncData.P.NotAsked, () => null)
+          .with(AsyncData.P.Loading, () => <ActivityIndicator color={colors.gray[500]} />)
+          .with(AsyncData.P.Done(Result.P.Ok(P.select())), data =>
+            isScheduled
+              ? null
+              : match(data.ibanValidation)
+                  .with(INSTANT_CREDIT_TRANSFER_AVAILABLE_PATTERN, () => null)
+                  .otherwise(() => (
+                    <LakeAlert
+                      anchored={true}
+                      variant="info"
+                      title={t("transfer.new.schedule.instantCreditTransfer.notAvailable")}
+                    >
+                      <LakeText>
+                        {t("transfer.new.schedule.instantCreditTransfer.notAvailableDescription")}
+                      </LakeText>
+                    </LakeAlert>
+                  )),
+          )
+          .otherwise(() => null)}
+      >
+        <LakeLabel
+          label={t("transfer.new.schedule.label")}
+          type="radioGroup"
+          render={() => (
+            <RadioGroup
+              disabled={loading}
+              direction="row"
+              items={scheduleItems}
+              value={isScheduled}
+              onValueChange={setIsScheduled.toggle}
+            />
+          )}
+        />
 
-                <Space height={12} />
+        <ResponsiveContainer breakpoint={800}>
+          {({ large }) =>
+            isScheduled ? (
+              <Box direction={large ? "row" : "column"}>
+                <View style={styles.field}>
+                  <Field name="scheduledDate">
+                    {({ value, onChange, error }) => (
+                      <DatePicker
+                        label={t("transfer.new.scheduleDate.label")}
+                        value={value}
+                        error={error}
+                        format={locale.dateFormat}
+                        firstWeekDay={locale.firstWeekday}
+                        onChange={onChange}
+                        isSelectable={isDateInRange(
+                          dayjs.utc().toDate(),
+                          dayjs.utc().add(1, "year").toDate(),
+                        )}
+                      />
+                    )}
+                  </Field>
+                </View>
 
-                <ResponsiveContainer breakpoint={800}>
-                  {({ large }) => (
-                    <FieldsListener names={["isScheduled"]}>
-                      {({ isScheduled }) =>
-                        isScheduled.value ? (
-                          <Box direction={large ? "row" : "column"}>
-                            <View style={styles.field}>
-                              <Field name="scheduledDate">
-                                {({ value, onChange, error }) => (
-                                  <DatePicker
-                                    label={t("transfer.new.scheduleDate.label")}
-                                    value={value}
-                                    error={error}
-                                    format={locale.dateFormat}
-                                    firstWeekDay={locale.firstWeekday}
-                                    onChange={onChange}
-                                    isSelectable={isDateInRange(
-                                      dayjs.utc().toDate(),
-                                      dayjs.utc().add(1, "year").toDate(),
-                                    )}
-                                  />
-                                )}
-                              </Field>
-                            </View>
+                <Space width={24} />
 
-                            <Space width={24} />
-
-                            <View style={styles.field}>
-                              <LakeLabel
-                                label={t("transfer.new.scheduleTime.label")}
-                                render={id => (
-                                  <Field name="scheduledTime">
-                                    {({ value, onChange, onBlur, error, valid, ref }) => (
-                                      <Rifm value={value} onChange={onChange} {...rifmTimeProps}>
-                                        {({ value, onChange }) => (
-                                          <LakeTextInput
-                                            id={id}
-                                            ref={ref}
-                                            readOnly={loading}
-                                            placeholder={locale.timePlaceholder.slice(0, -3)}
-                                            value={value}
-                                            error={error}
-                                            valid={valid}
-                                            onChange={onChange}
-                                            onBlur={onBlur}
-                                          />
-                                        )}
-                                      </Rifm>
-                                    )}
-                                  </Field>
-                                )}
+                <View style={styles.field}>
+                  <LakeLabel
+                    label={t("transfer.new.scheduleTime.label")}
+                    render={id => (
+                      <Field name="scheduledTime">
+                        {({ value, onChange, onBlur, error, valid, ref }) => (
+                          <Rifm value={value} onChange={onChange} {...rifmTimeProps}>
+                            {({ value, onChange }) => (
+                              <LakeTextInput
+                                id={id}
+                                ref={ref}
+                                readOnly={loading}
+                                placeholder={locale.timePlaceholder.slice(0, -3)}
+                                value={value}
+                                error={error}
+                                valid={valid}
+                                onChange={onChange}
+                                onBlur={onBlur}
                               />
-                            </View>
-                          </Box>
-                        ) : (
-                          match(data.ibanValidation)
-                            .with(INSTANT_CREDIT_TRANSFER_AVAILABLE_PATTERN, () => (
-                              <>
-                                <Field name="isInstant">
-                                  {({ value, onChange }) => (
-                                    <LakeLabelledCheckbox
-                                      disabled={loading}
-                                      label={t("transfer.new.instantTransfer")}
-                                      value={value}
-                                      onValueChange={onChange}
-                                    />
-                                  )}
-                                </Field>
-                              </>
-                            ))
-                            .otherwise(() => null)
-                        )
-                      }
-                    </FieldsListener>
-                  )}
-                </ResponsiveContainer>
-              </Tile>
+                            )}
+                          </Rifm>
+                        )}
+                      </Field>
+                    )}
+                  />
+                </View>
+              </Box>
+            ) : (
+              match(data)
+                .with(
+                  AsyncData.P.NotAsked,
+                  AsyncData.P.Done(
+                    Result.P.Ok({ ibanValidation: INSTANT_CREDIT_TRANSFER_AVAILABLE_PATTERN }),
+                  ),
+                  () => (
+                    <>
+                      <LakeLabelledCheckbox
+                        disabled={loading}
+                        label={t("transfer.new.instantTransfer")}
+                        value={isInstant}
+                        onValueChange={setIsInstant.toggle}
+                      />
 
-              <Space height={32} />
+                      {!isInstant && (
+                        <>
+                          <Space height={4} />
+                          <LakeText>{t("transfer.new.regularTransferDescription")}</LakeText>
+                        </>
+                      )}
+                    </>
+                  ),
+                )
+                .otherwise(() => null)
+            )
+          }
+        </ResponsiveContainer>
+      </Tile>
 
-              <ResponsiveContainer breakpoint={800}>
-                {({ small }) => (
-                  <LakeButtonGroup>
-                    <LakeButton
-                      color="gray"
-                      mode="secondary"
-                      onPress={onPressPrevious}
-                      grow={small}
-                    >
-                      {t("common.previous")}
-                    </LakeButton>
+      <Space height={32} />
 
-                    <LakeButton
-                      color="current"
-                      onPress={onPressSubmit}
-                      loading={loading}
-                      grow={small}
-                    >
-                      {t("common.continue")}
-                    </LakeButton>
-                  </LakeButtonGroup>
-                )}
-              </ResponsiveContainer>
-            </>
-          );
-        })
-        .with(AsyncData.P.Done(Result.P.Error(P.select())), error => <ErrorView error={error} />)
-        .otherwise(() => (
-          <ErrorView />
-        ))}
+      <ResponsiveContainer breakpoint={800}>
+        {({ small }) => (
+          <LakeButtonGroup>
+            <LakeButton color="gray" mode="secondary" onPress={onPressPrevious} grow={small}>
+              {t("common.previous")}
+            </LakeButton>
+
+            <LakeButton color="current" onPress={onPressSubmit} loading={loading} grow={small}>
+              {t("common.continue")}
+            </LakeButton>
+          </LakeButtonGroup>
+        )}
+      </ResponsiveContainer>
     </>
   );
 };

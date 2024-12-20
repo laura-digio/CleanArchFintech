@@ -1,19 +1,11 @@
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { Option } from "@swan-io/boxed";
 import { useEffect } from "react";
-import { dispatchToPopupOpener } from "../states/popup";
+import { sendClosePopupMessage } from "../utils/popup";
 
-type Props = {
-  redirectUrl?: string;
-};
-
-export const PopupCallbackPage = ({ redirectUrl }: Props) => {
+export const PopupCallbackPage = ({ redirectTo }: { redirectTo: string | undefined }) => {
   useEffect(() => {
-    if (!dispatchToPopupOpener({ type: "close-popup" })) {
-      if (isNotNullish(redirectUrl)) {
-        window.location.replace(redirectUrl);
-      }
-    }
-  }, [redirectUrl]);
+    sendClosePopupMessage(Option.fromNullable(redirectTo));
+  }, [redirectTo]);
 
   return null;
 };

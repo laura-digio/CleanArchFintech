@@ -1,27 +1,22 @@
 import { Option } from "@swan-io/boxed";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
-import { Space } from "@swan-io/lake/src/components/Space";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints } from "@swan-io/lake/src/constants/design";
 import { useBoolean } from "@swan-io/lake/src/hooks/useBoolean";
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
-import { isMobile } from "@swan-io/lake/src/utils/userAgent";
+import { isDecentMobileDevice } from "@swan-io/lake/src/utils/userAgent";
 import { useEffect } from "react";
 import { P, match } from "ts-pattern";
 import { FinalizeBlock, FinalizeInvalidSteps } from "../../components/FinalizeStepBlocks";
 import { OnboardingFooter } from "../../components/OnboardingFooter";
 import { OnboardingStepContent } from "../../components/OnboardingStepContent";
-import { IdentificationLevel } from "../../graphql/unauthenticated";
-import { openPopup } from "../../states/popup";
 import { env } from "../../utils/env";
+import { openPopup } from "../../utils/popup";
 import { projectConfiguration } from "../../utils/projectId";
 import { CompanyOnboardingRoute, Router } from "../../utils/routes";
 
 type Props = {
   previousStep: CompanyOnboardingRoute;
   onboardingId: string;
-  legalRepresentativeRecommendedIdentificationLevel: IdentificationLevel;
   steps: WizardStep<CompanyOnboardingRoute>[];
   alreadySubmitted: boolean;
   onSubmitWithErrors: () => void;
@@ -30,7 +25,6 @@ type Props = {
 export const OnboardingCompanyFinalize = ({
   previousStep,
   onboardingId,
-  legalRepresentativeRecommendedIdentificationLevel,
   steps,
   alreadySubmitted,
   onSubmitWithErrors,
@@ -59,7 +53,7 @@ export const OnboardingCompanyFinalize = ({
     }
 
     const queryString = new URLSearchParams();
-    queryString.append("identificationLevel", legalRepresentativeRecommendedIdentificationLevel);
+    queryString.append("identificationLevel", "Auto");
     queryString.append("onboardingId", onboardingId);
 
     match(projectConfiguration)
@@ -70,29 +64,26 @@ export const OnboardingCompanyFinalize = ({
 
     const url = `${env.BANKING_URL}/auth/login?${queryString.toString()}`;
 
-    if (isMobile) {
+    if (isDecentMobileDevice) {
       window.location.replace(url);
     } else {
-      openPopup({
-        url,
-        onClose: redirectUrl => {
-          if (isNotNullish(redirectUrl)) {
-            // We use location.replace to be sure that the auth
-            // cookie is correctly written before changing page
-            // (history pushState does not seem to offer these guarantees)
-            window.location.replace(redirectUrl);
-          }
-        },
+      openPopup(url).onResolve(redirectUrl => {
+        if (redirectUrl.isSome()) {
+          // We use location.replace to be sure that the auth
+          // cookie is correctly written before changing page
+          // (history pushState does not seem to offer these guarantees)
+          window.location.replace(redirectUrl.get());
+        }
       });
     }
   };
 
   return (
-    <>
-      <OnboardingStepContent>
-        <ResponsiveContainer breakpoint={breakpoints.medium} style={commonStyles.fill}>
+    <OnboardingStepContent>
+      <Box justifyContent="center" grow={1}>
+        <ResponsiveContainer breakpoint={breakpoints.medium}>
           {({ small }) => (
-            <Box alignItems="center" justifyContent="center" style={commonStyles.fillNoShrink}>
+            <Box alignItems="center" justifyContent="center">
               {containsErrors && alreadySubmitted ? (
                 <FinalizeInvalidSteps
                   onboardingId={onboardingId}
@@ -103,8 +94,6 @@ export const OnboardingCompanyFinalize = ({
               ) : (
                 <FinalizeBlock isMobile={small} />
               )}
-
-              <Space height={12} />
             </Box>
           )}
         </ResponsiveContainer>
@@ -113,8 +102,9 @@ export const OnboardingCompanyFinalize = ({
           nextLabel="wizard.finalize"
           onPrevious={onPressPrevious}
           onNext={onPressNext}
+          justifyContent="center"
         />
-      </OnboardingStepContent>
-    </>
+      </Box>
+    </OnboardingStepContent>
   );
 };

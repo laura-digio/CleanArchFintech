@@ -1,9 +1,11 @@
 import { Page, expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { match } from "ts-pattern";
+import { CreateSandboxIdentificationDocument } from "./graphql/partner-admin";
+import { getApiRequester } from "./utils/api";
 import { env } from "./utils/env";
 import { t } from "./utils/i18n";
-import { clickOnButton, clickOnLink, clickOnText, getByText, waitForText } from "./utils/selectors";
+import { clickOnButton, clickOnLink, clickOnText, waitForText } from "./utils/selectors";
 import { getSession } from "./utils/session";
 
 type Options = {
@@ -12,6 +14,19 @@ type Options = {
   | { kind: "virtual" | "virtualAndPhysical" }
   | { kind: "singleUse"; variant: "oneOff" | "recurring" }
 );
+
+test.beforeAll(async ({ request }) => {
+  const requestApi = getApiRequester(request);
+  const { benady } = await getSession();
+  await requestApi({
+    query: CreateSandboxIdentificationDocument,
+    as: "user",
+    api: "partner-admin",
+    variables: {
+      userId: benady.id,
+    },
+  });
+});
 
 const create = async (page: Page, options: Options) => {
   const { benady } = await getSession();
@@ -41,7 +56,7 @@ const create = async (page: Page, options: Options) => {
   await clickOnButton(layer, t("banking.common.next"));
 
   await waitForText(layer, t("banking.cardWizard.header.cardSettings"));
-  await layer.getByLabel("Card name - (optional)").fill(name);
+  await layer.getByLabel("Card name - optional").fill(name);
 
   if (options.kind === "singleUse") {
     await layer.getByLabel(t("banking.cardSettings.amount")).fill("42");
@@ -55,10 +70,12 @@ const create = async (page: Page, options: Options) => {
   await clickOnButton(layer, t("banking.common.next"));
   await layer.waitFor({ state: "detached" });
 
-  const title = t("banking.cardList.fullNameAndCardType");
-  await waitForText(main, new RegExp(`${title}|Reveal card numbers`));
+  const fullNameAndCardType = main.getByText(t("banking.cardList.fullNameAndCardType"));
+  const revealNumbers = main.getByText(t("banking.card.revealNumbers"));
 
-  if (await getByText(main, title).isVisible()) {
+  await expect(fullNameAndCardType.or(revealNumbers)).toBeVisible();
+
+  if (await fullNameAndCardType.isVisible()) {
     const cards = main.getByTestId("user-card-item");
     await cards.getByText(name, { exact: true }).click();
   }

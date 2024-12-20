@@ -1,41 +1,34 @@
 import { Array, Option, Result } from "@swan-io/boxed";
 import { Link } from "@swan-io/chicane";
+import { useMutation, useQuery } from "@swan-io/graphql-client";
 import { BorderedIcon } from "@swan-io/lake/src/components/BorderedIcon";
 import { Box } from "@swan-io/lake/src/components/Box";
-import {
-  FixedListViewEmpty,
-  PlainListViewPlaceholder,
-} from "@swan-io/lake/src/components/FixedListView";
-import {
-  CellAction,
-  CenteredCell,
-  EndAlignedCell,
-  SimpleHeaderCell,
-  SimpleRegularTextCell,
-  SimpleTitleCell,
-} from "@swan-io/lake/src/components/FixedListViewCells";
+import { Cell, HeaderCell, TextCell } from "@swan-io/lake/src/components/Cells";
+import { EmptyView } from "@swan-io/lake/src/components/EmptyView";
 import { Icon } from "@swan-io/lake/src/components/Icon";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
 import { LakeLabel } from "@swan-io/lake/src/components/LakeLabel";
 import { LakeScrollView } from "@swan-io/lake/src/components/LakeScrollView";
 import { Item, LakeSelect } from "@swan-io/lake/src/components/LakeSelect";
 import { LakeTextInput } from "@swan-io/lake/src/components/LakeTextInput";
-import { ColumnConfig, PlainListView } from "@swan-io/lake/src/components/PlainListView";
+import {
+  ColumnConfig,
+  PlainListView,
+  PlainListViewPlaceholder,
+} from "@swan-io/lake/src/components/PlainListView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { TransitionView } from "@swan-io/lake/src/components/TransitionView";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { animations, breakpoints, colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { showToast } from "@swan-io/lake/src/state/toasts";
 import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
 import { GetNode } from "@swan-io/lake/src/utils/types";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
+import { combineValidators, useForm } from "@swan-io/use-form";
 import dayjs from "dayjs";
 import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { combineValidators, hasDefinedKeys, useForm } from "react-ux-form";
 import { Rifm } from "rifm";
 import { P, isMatching } from "ts-pattern";
 import {
@@ -45,8 +38,10 @@ import {
   GenerateAccountStatementDocument,
   StatementType,
 } from "../graphql/partner";
-import { languages, locale, rifmDateProps, t } from "../utils/i18n";
+import { usePermissions } from "../hooks/usePermissions";
+import { accountLanguages, languages, locale, rifmDateProps, t } from "../utils/i18n";
 import { validateDate, validateRequired } from "../utils/validations";
+import { Connection } from "./Connection";
 import { ErrorView } from "./ErrorView";
 
 const styles = StyleSheet.create({
@@ -86,14 +81,7 @@ const styles = StyleSheet.create({
 });
 
 const isCountryAccountLanguage = isMatching({
-  id: P.union(
-    "de" as const,
-    "en" as const,
-    "es" as const,
-    "fr" as const,
-    "it" as const,
-    "nl" as const,
-  ),
+  id: accountLanguages.P,
   name: P.string,
   native: P.string,
   cca3: P.string,
@@ -123,37 +111,36 @@ const columns: ColumnConfig<Statement, ExtraInfo>[] = [
     title: t("accountStatements.period"),
     width: "grow",
     id: "period",
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { openingDate, closingDate } }) => {
       const openingDateStatement = dayjs.utc(openingDate).add(1, "hour").format("MMM, DD YYYY");
       const closingDateStatement = dayjs.utc(closingDate).add(1, "hour").format("MMM, DD YYYY");
-      return <SimpleTitleCell text={`${openingDateStatement} - ${closingDateStatement}`} />;
+      return (
+        <TextCell variant="medium" text={`${openingDateStatement} - ${closingDateStatement}`} />
+      );
     },
   },
   {
     title: t("accountStatements.generated"),
     width: 150,
     id: "generated",
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} />,
+    renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item: { createdAt, status } }) => {
       return status === "Available" ? (
-        <SimpleRegularTextCell
-          textAlign="left"
-          variant="smallMedium"
-          text={dayjs(createdAt).format("MMM, DD YYYY")}
-        />
+        <TextCell variant="smallMedium" text={dayjs(createdAt).format("MMM, DD YYYY")} />
       ) : null;
     },
   },
   {
     title: "notReady",
-    width: "grow",
+    width: 180,
     id: "notReady",
     renderTitle: () => null,
     renderCell: ({ item: { status } }) => {
       return status === "Available" ? null : (
-        <SimpleRegularTextCell
-          textAlign="right"
+        <TextCell
+          align="right"
+          color={colors.gray[300]}
           variant="smallMedium"
           text={t("accountStatements.notReady")}
         />
@@ -161,15 +148,15 @@ const columns: ColumnConfig<Statement, ExtraInfo>[] = [
     },
   },
   {
-    title: t("accountStatements.action"),
-    width: 70,
-    id: "action",
-    renderTitle: ({ title }) => <SimpleHeaderCell text={title} justifyContent="center" />,
+    width: 40,
+    id: "actions",
+    title: "",
+    renderTitle: () => null,
     renderCell: ({ item: { status } }) => {
       return status === "Available" ? (
-        <CenteredCell>
+        <Cell align="center">
           <Icon name="open-regular" size={16} color={colors.gray[300]} />
-        </CenteredCell>
+        </Cell>
       ) : null;
     },
   },
@@ -184,25 +171,22 @@ const smallColumns: ColumnConfig<Statement, ExtraInfo>[] = [
     renderCell: ({ item: { openingDate, closingDate } }) => {
       const openingDateStatement = dayjs.utc(openingDate).add(1, "hour").format("MMM, DD YYYY");
       const closingDateStatement = dayjs.utc(closingDate).add(1, "hour").format("MMM, DD YYYY");
-      return <SimpleTitleCell text={`${openingDateStatement} - ${closingDateStatement}`} />;
+      return (
+        <TextCell variant="medium" text={`${openingDateStatement} - ${closingDateStatement}`} />
+      );
     },
   },
-
   {
-    title: t("accountStatements.action"),
-    width: 50,
+    width: 40,
     id: "actions",
+    title: "",
     renderTitle: () => null,
     renderCell: ({ item: { status } }) => {
-      return status === "Available" ? (
-        <EndAlignedCell>
-          <CellAction>
+      return (
+        <Cell align="right">
+          {status === "Available" ? (
             <Icon name="open-regular" size={16} color={colors.gray[300]} />
-          </CellAction>
-        </EndAlignedCell>
-      ) : (
-        <EndAlignedCell>
-          <CellAction>
+          ) : (
             <BorderedIcon
               name="clock-regular"
               padding={4}
@@ -210,8 +194,8 @@ const smallColumns: ColumnConfig<Statement, ExtraInfo>[] = [
               color="warning"
               borderRadius={4}
             />
-          </CellAction>
-        </EndAlignedCell>
+          )}
+        </Cell>
       );
     },
   },
@@ -235,11 +219,11 @@ const NewStatementForm = ({
   }>({
     startDate: {
       initialValue: "",
-      validate: (value, { getFieldState }) => {
+      validate: (value, { getFieldValue }) => {
         const openingDate = dayjs.utc(value, locale.dateFormat).subtract(1, "hour");
 
         const closingDate = dayjs
-          .utc(getFieldState("closingDate").value, locale.dateFormat)
+          .utc(getFieldValue("closingDate"), locale.dateFormat)
           .subtract(1, "hour");
 
         //check if statements are longer than 3 months
@@ -255,10 +239,10 @@ const NewStatementForm = ({
     },
     closingDate: {
       initialValue: "",
-      validate: (value, { getFieldState }) => {
+      validate: (value, { getFieldValue }) => {
         // account statements use UTC+1
         const openingDate = dayjs
-          .utc(getFieldState("startDate").value, locale.dateFormat)
+          .utc(getFieldValue("startDate"), locale.dateFormat)
           .subtract(1, "hour");
         const closingDate = dayjs.utc(value, locale.dateFormat).subtract(1, "hour");
 
@@ -288,7 +272,7 @@ const NewStatementForm = ({
     },
   });
 
-  const [statement, generateStatement] = useUrqlMutation(GenerateAccountStatementDocument);
+  const [generateStatement, statement] = useMutation(GenerateAccountStatementDocument);
 
   const languageOptions: Item<AccountLanguage>[] = useMemo(
     () =>
@@ -300,34 +284,39 @@ const NewStatementForm = ({
   );
 
   const onPressSubmit = () => {
-    submitForm(values => {
-      if (hasDefinedKeys(values, ["startDate", "closingDate", "format", "language"])) {
-        return generateStatement({
-          input: {
-            accountId,
-            openingDate: dayjs
-              .utc(values.startDate, locale.dateFormat)
-              .format("YYYY-MM-DDT00:00:00.000+01:00"),
-            closingDate: dayjs
-              .utc(values.closingDate, locale.dateFormat)
-              .format("YYYY-MM-DDT23:59:59.999+01:00"),
-            statementType: values.format,
-            language: values.language,
-          },
-        })
-          .mapOk(data => data.generateAccountStatement)
-          .mapOkToResult(({ __typename }) =>
-            __typename === "Statement" ? Result.Ok(undefined) : Result.Error(__typename),
-          )
-          .tapOk(() => {
-            setOpenNewStatement(false);
-            reload();
+    submitForm({
+      onSuccess: values => {
+        const option = Option.allFromDict(values);
+
+        if (option.isSome()) {
+          const { startDate, closingDate, format, language } = option.get();
+
+          return generateStatement({
+            input: {
+              accountId,
+              openingDate: dayjs
+                .utc(startDate, locale.dateFormat)
+                .format("YYYY-MM-DDT00:00:00.000+01:00"),
+              closingDate: dayjs
+                .utc(closingDate, locale.dateFormat)
+                .format("YYYY-MM-DDT23:59:59.999+01:00"),
+              statementType: format,
+              language,
+            },
           })
-          .tapError(error => {
-            showToast({ variant: "error", title: translateError(error) });
-          })
-          .toPromise();
-      }
+            .mapOk(data => data.generateAccountStatement)
+            .mapOkToResult(({ __typename }) =>
+              __typename === "Statement" ? Result.Ok(undefined) : Result.Error(__typename),
+            )
+            .tapOk(() => {
+              setOpenNewStatement(false);
+              reload();
+            })
+            .tapError(error => {
+              showToast({ variant: "error", error, title: translateError(error) });
+            });
+        }
+      },
     });
   };
 
@@ -452,33 +441,22 @@ export const AccountStatementCustom = ({ accountId, large }: Props) => {
   // it avoid to animate the first time the list is displayed
   const [newWasOpened, setNewWasOpened] = useState(false);
 
+  const { canGenerateAccountStatement } = usePermissions();
+
   const [displayedView, setDisplayedView] = useState<"list" | "new">("list");
-  const { data, nextData, setAfter, reload } = useUrqlPaginatedQuery(
-    {
-      query: AccountStatementsPageDocument,
-      variables: {
-        first: PER_PAGE,
-        accountId,
-        filters: {
-          period: "Custom",
-        },
-      },
+  const [data, { isLoading, reload, setVariables }] = useQuery(AccountStatementsPageDocument, {
+    first: PER_PAGE,
+    accountId,
+    filters: {
+      period: "Custom",
     },
-    [accountId],
-  );
+  });
 
   return (
     <>
       {data.match({
         NotAsked: () => null,
-        Loading: () => (
-          <PlainListViewPlaceholder
-            count={20}
-            rowVerticalSpacing={0}
-            headerHeight={0}
-            rowHeight={48}
-          />
-        ),
+        Loading: () => <PlainListViewPlaceholder count={20} headerHeight={48} rowHeight={48} />,
         Done: result =>
           result.match({
             Error: error => <ErrorView error={error} />,
@@ -492,7 +470,9 @@ export const AccountStatementCustom = ({ accountId, large }: Props) => {
                           large={large}
                           accountId={accountId}
                           onCancel={() => setDisplayedView("list")}
-                          onSuccess={reload}
+                          onSuccess={() => {
+                            reload();
+                          }}
                         />
                       ) : null}
                     </TransitionView>
@@ -503,7 +483,8 @@ export const AccountStatementCustom = ({ accountId, large }: Props) => {
                     >
                       {displayedView === "list" ? (
                         <>
-                          {isNotNullish(account) &&
+                          {canGenerateAccountStatement &&
+                            isNotNullish(account) &&
                             isNotNullish(account.statements) &&
                             account.statements.totalCount > 0 && (
                               <>
@@ -530,57 +511,74 @@ export const AccountStatementCustom = ({ accountId, large }: Props) => {
                               </>
                             )}
 
-                          <PlainListView
-                            headerStyle={styles.columnHeaders}
-                            rowStyle={() =>
-                              large ? styles.containerRowLarge : styles.containerRow
-                            }
-                            breakpoint={breakpoints.tiny}
-                            data={account?.statements?.edges?.map(({ node }) => node) ?? []}
-                            keyExtractor={item => item.id}
-                            headerHeight={48}
-                            rowHeight={48}
-                            groupHeaderHeight={48}
-                            extraInfo={{ large }}
-                            columns={columns}
-                            getRowLink={({ item }) =>
-                              Array.findMap(item.type, item => Option.fromNullable(item?.url))
-                                .map(url => <Link to={url} target="_blank" />)
-                                .getWithDefault(<View />)
-                            }
-                            loading={{
-                              isLoading: nextData.isLoading(),
-                              count: NUM_TO_RENDER,
-                            }}
-                            onEndReached={() => {
-                              if (account?.statements?.pageInfo.hasNextPage ?? false) {
-                                setAfter(account?.statements?.pageInfo.endCursor ?? undefined);
-                              }
-                            }}
-                            renderEmptyList={() => (
-                              <FixedListViewEmpty
-                                borderedIcon={true}
-                                icon="lake-inbox-empty"
-                                title={t("accountStatements.empty.title")}
-                                subtitle={t("accountStatements.empty.subtitle")}
-                              >
-                                <Space height={24} />
+                          <Connection connection={account?.statements}>
+                            {statements => (
+                              <PlainListView
+                                headerStyle={styles.columnHeaders}
+                                rowStyle={() =>
+                                  large ? styles.containerRowLarge : styles.containerRow
+                                }
+                                breakpoint={breakpoints.medium}
+                                data={statements?.edges?.map(({ node }) => node) ?? []}
+                                keyExtractor={item => item.id}
+                                headerHeight={48}
+                                rowHeight={48}
+                                groupHeaderHeight={48}
+                                extraInfo={{ large }}
+                                columns={columns}
+                                getRowLink={({ item }) => {
+                                  const availableItem =
+                                    item.status === "Available" ? Option.Some(item) : Option.None();
+                                  return availableItem
+                                    .flatMap(item =>
+                                      Array.findMap(item.type, item =>
+                                        Option.fromNullable(item?.url),
+                                      ),
+                                    )
+                                    .map(url => <Link to={url} target="_blank" />)
+                                    .getOr(<View />);
+                                }}
+                                loading={{
+                                  isLoading,
+                                  count: NUM_TO_RENDER,
+                                }}
+                                onEndReached={() => {
+                                  if (statements?.pageInfo.hasNextPage ?? false) {
+                                    setVariables({
+                                      after: statements?.pageInfo.endCursor ?? undefined,
+                                    });
+                                  }
+                                }}
+                                renderEmptyList={() => (
+                                  <EmptyView
+                                    borderedIcon={true}
+                                    icon="lake-inbox-empty"
+                                    title={t("accountStatements.empty.title")}
+                                    subtitle={t("accountStatements.empty.subtitle")}
+                                  >
+                                    {canGenerateAccountStatement ? (
+                                      <>
+                                        <Space height={24} />
 
-                                <LakeButton
-                                  size="small"
-                                  icon="add-circle-filled"
-                                  onPress={() => {
-                                    setNewWasOpened(true);
-                                    setDisplayedView("new");
-                                  }}
-                                  color="current"
-                                >
-                                  {t("common.new")}
-                                </LakeButton>
-                              </FixedListViewEmpty>
+                                        <LakeButton
+                                          size="small"
+                                          icon="add-circle-filled"
+                                          onPress={() => {
+                                            setNewWasOpened(true);
+                                            setDisplayedView("new");
+                                          }}
+                                          color="current"
+                                        >
+                                          {t("common.new")}
+                                        </LakeButton>
+                                      </>
+                                    ) : null}
+                                  </EmptyView>
+                                )}
+                                smallColumns={smallColumns}
+                              />
                             )}
-                            smallColumns={smallColumns}
-                          />
+                          </Connection>
                         </>
                       ) : null}
                     </TransitionView>

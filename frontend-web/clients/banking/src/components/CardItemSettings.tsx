@@ -1,27 +1,32 @@
 import { Result } from "@swan-io/boxed";
-import { FixedListViewEmpty } from "@swan-io/lake/src/components/FixedListView";
+import { useMutation } from "@swan-io/graphql-client";
+import { Box } from "@swan-io/lake/src/components/Box";
+import { Icon } from "@swan-io/lake/src/components/Icon";
 import { LakeAlert } from "@swan-io/lake/src/components/LakeAlert";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
+import { LakeText } from "@swan-io/lake/src/components/LakeText";
+import { Link } from "@swan-io/lake/src/components/Link";
 import { Space } from "@swan-io/lake/src/components/Space";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { colors } from "@swan-io/lake/src/constants/design";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { getCCA2forCCA3, isCountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
 import { useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { P, match } from "ts-pattern";
-import { CardPageQuery, IdentificationStatus, UpdateCardDocument } from "../graphql/partner";
-import { getMemberName } from "../utils/accountMembership";
-import { t } from "../utils/i18n";
+import { CardPageQuery, UpdateCardDocument } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
+import { formatNestedMessage, t } from "../utils/i18n";
 import { Router } from "../utils/routes";
 import { CardCancelConfirmationModal } from "./CardCancelConfirmationModal";
-import { CardItemIdentityVerificationGate } from "./CardItemIdentityVerificationGate";
 import { CardSettings, CardWizardSettings, CardWizardSettingsRef } from "./CardWizardSettings";
 
 const styles = StyleSheet.create({
-  empty: {
-    display: "block",
+  link: {
+    color: colors.current.primary,
+    display: "inline-block",
   },
 });
 
@@ -30,30 +35,16 @@ type Card = NonNullable<CardPageQuery["card"]>;
 type Props = {
   card: Card;
   cardId: string;
-  projectId: string;
   accountMembershipId: string;
-  cardRequiresIdentityVerification: boolean;
-  isCurrentUserCardOwner: boolean;
-  onRefreshAccountRequest: () => void;
-  identificationStatus?: IdentificationStatus;
-  canManageCards: boolean;
 };
 
-export const CardItemSettings = ({
-  cardId,
-  projectId,
-  accountMembershipId,
-  card,
-  cardRequiresIdentityVerification,
-  isCurrentUserCardOwner,
-  onRefreshAccountRequest,
-  identificationStatus,
-  canManageCards,
-}: Props) => {
-  const [cardUpdate, updateCard] = useUrqlMutation(UpdateCardDocument);
+export const CardItemSettings = ({ cardId, accountMembershipId, card }: Props) => {
+  const [updateCard, cardUpdate] = useMutation(UpdateCardDocument);
   const [isCancelConfirmationModalVisible, setIsCancelConfirmationModalVisible] = useState(false);
   const accountHolder = card.accountMembership.account?.holder;
   const settingsRef = useRef<CardWizardSettingsRef | null>(null);
+
+  const { canUpdateCard } = usePermissions();
 
   const onSubmit = ({
     spendingLimit,
@@ -83,7 +74,7 @@ export const CardItemSettings = ({
         window.location.replace(consentUrl);
       })
       .tapError(error => {
-        showToast({ variant: "error", title: translateError(error) });
+        showToast({ variant: "error", error, title: translateError(error) });
       });
   };
 
@@ -108,31 +99,9 @@ export const CardItemSettings = ({
     };
   };
 
-  return cardRequiresIdentityVerification && isCurrentUserCardOwner ? (
-    <View style={styles.empty}>
-      <FixedListViewEmpty
-        borderedIcon={true}
-        icon="lake-settings"
-        title={t("card.settings.unavailable")}
-      >
-        <Space height={24} />
-
-        <CardItemIdentityVerificationGate
-          recommendedIdentificationLevel={card.accountMembership.recommendedIdentificationLevel}
-          isCurrentUserCardOwner={isCurrentUserCardOwner}
-          projectId={projectId}
-          description={t("card.identityVerification.settings")}
-          descriptionForOtherMember={t("card.identityVerification.settings.otherMember", {
-            name: getMemberName({ accountMembership: card.accountMembership }),
-          })}
-          onComplete={onRefreshAccountRequest}
-          identificationStatus={identificationStatus}
-        />
-      </FixedListViewEmpty>
-    </View>
-  ) : (
+  return (
     <>
-      {!canManageCards && (
+      {card.accountMembership.canManageCards ? null : (
         <>
           <LakeAlert title={t("card.settings.notAllowed")} variant="info" />
           <Space height={24} />
@@ -156,8 +125,45 @@ export const CardItemSettings = ({
         }}
         onSubmit={onSubmit}
         accountHolder={accountHolder}
-        canManageCards={canManageCards}
       />
+
+      {match({
+        type: accountHolder?.info.type,
+        country: isCountryCCA3(card.issuingCountry)
+          ? getCCA2forCCA3(card.issuingCountry)?.toLowerCase()
+          : undefined,
+      })
+        .with({ type: "Company", country: P.nonNullable }, ({ country }) => (
+          <>
+            <Space height={24} />
+
+            <LakeText variant="smallRegular">
+              {formatNestedMessage("card.mastercardBonusProgramLink", {
+                learnMoreLink: (
+                  <>
+                    <Link
+                      style={styles.link}
+                      to={`https://www.mastercard.com/businessbonus/${country}/home`}
+                      target="blank"
+                    >
+                      <Box direction="row" alignItems="center">
+                        <LakeText color={colors.current.primary} variant="smallRegular">
+                          {t("common.learnMore")}
+                        </LakeText>
+
+                        <Space width={4} />
+                        <Icon color={colors.current.primary} name="open-filled" size={16} />
+                      </Box>
+                    </Link>
+                  </>
+                ),
+              })}
+            </LakeText>
+
+            <Space height={16} />
+          </>
+        ))
+        .otherwise(() => null)}
 
       <LakeButtonGroup>
         {match(card.statusInfo)
@@ -178,11 +184,11 @@ export const CardItemSettings = ({
             <View />
           ))}
 
-        {canManageCards && (
+        {canUpdateCard ? (
           <LakeButton color="current" onPress={onPressSubmit} loading={cardUpdate.isLoading()}>
             {t("common.save")}
           </LakeButton>
-        )}
+        ) : null}
       </LakeButtonGroup>
 
       <CardCancelConfirmationModal

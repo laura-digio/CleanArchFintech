@@ -19,8 +19,7 @@ import {
   negativeSpacings,
   spacings,
 } from "@swan-io/lake/src/constants/design";
-import { useResponsive } from "@swan-io/lake/src/hooks/useResponsive";
-import { emptyToUndefined, isNullish } from "@swan-io/lake/src/utils/nullish";
+import { isNullish } from "@swan-io/lake/src/utils/nullish";
 import { ChoicePicker } from "@swan-io/shared-business/src/components/ChoicePicker";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -32,6 +31,7 @@ import {
   SpendingLimitInput,
   SpendingLimitPeriodInput,
 } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { t } from "../utils/i18n";
 import { CardFormat } from "./CardWizardFormat";
 
@@ -76,7 +76,6 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   sliderContainerLarge: {
-    marginTop: negativeSpacings[48],
     zIndex: 1,
   },
   item: {
@@ -89,6 +88,14 @@ const styles = StyleSheet.create({
   description: {
     width: 1,
     flexGrow: 1,
+  },
+  sliderInput: {
+    marginTop: negativeSpacings[40],
+  },
+  input: {
+    maxWidth: 120,
+    zIndex: 1,
+    position: "relative",
   },
 });
 
@@ -132,7 +139,6 @@ type Props = {
   initialSettings?: OptionalCardSettings;
   onSubmit: (cardSettings: CardSettings) => void;
   accountHolder?: AccountHolderForCardSettingsFragment;
-  canManageCards: boolean;
   maxSpendingLimit?: { amount: Amount };
 };
 
@@ -140,10 +146,7 @@ type ValidationError = "InvalidAmount";
 
 const validate = (input: DirtyCardSettings): Result<CardSettings, ValidationError[]> => {
   const errors: ValidationError[] = [];
-  if (
-    isNullish(input.spendingLimit.amount.value) ||
-    Number(input.spendingLimit.amount.value) === 0
-  ) {
+  if (isNullish(input.spendingLimit.amount.value)) {
     errors.push("InvalidAmount" as const);
   }
   return errors.length > 0 ? Result.Error(errors) : Result.Ok(input as CardSettings);
@@ -225,39 +228,28 @@ const PERIODS = [
 
 export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
   (
-    {
-      accountHolder,
-      cardFormat,
-      initialSettings,
-      cardProduct,
-      canManageCards,
-      onSubmit,
-      maxSpendingLimit,
-    }: Props,
+    { accountHolder, cardFormat, initialSettings, cardProduct, onSubmit, maxSpendingLimit }: Props,
     ref,
   ) => {
+    const { canUpdateCard } = usePermissions();
     const spendingLimitMaxValue = match({
       accountHolderType: accountHolder?.info.__typename,
       maxSpendingLimit,
     })
-      .with({ maxSpendingLimit: P.not(P.nullish) }, ({ maxSpendingLimit }) =>
+      .with({ maxSpendingLimit: P.nonNullable }, ({ maxSpendingLimit }) =>
         Number(maxSpendingLimit.amount.value),
-      )
-      .with({ accountHolderType: "AccountHolderCompanyInfo" }, () =>
-        Number(cardProduct.companySpendingLimit.amount.value),
       )
       .with({ accountHolderType: "AccountHolderIndividualInfo" }, () =>
         Number(cardProduct.individualSpendingLimit.amount.value),
       )
-      .otherwise(() => null);
+      .otherwise(() => Number(cardProduct.companySpendingLimit.amount.value));
 
     const currency = match(accountHolder?.info.__typename)
-      .with("AccountHolderCompanyInfo", () => cardProduct.companySpendingLimit.amount.currency)
       .with(
         "AccountHolderIndividualInfo",
         () => cardProduct.individualSpendingLimit.amount.currency,
       )
-      .otherwise(() => "EUR");
+      .otherwise(() => cardProduct.companySpendingLimit.amount.currency);
 
     const [currentSettings, setCurrentSettings] = useState<DirtyCardSettings>(() => ({
       cardName: initialSettings?.cardName,
@@ -297,8 +289,6 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
         ? undefined
         : String(currentSettings.spendingLimit.amount.value),
     );
-
-    const { desktop } = useResponsive(920);
 
     useEffect(() => {
       setDirtyValue(
@@ -347,7 +337,7 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                 render={id => (
                   <LakeTextInput
                     id={id}
-                    disabled={!canManageCards}
+                    disabled={!canUpdateCard}
                     value={currentSettings.cardName ?? ""}
                     onChangeText={cardName =>
                       setCurrentSettings(settings => ({
@@ -358,7 +348,7 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                     onBlur={() =>
                       setCurrentSettings(settings => ({
                         ...settings,
-                        cardName: emptyToUndefined(settings?.cardName?.trim() ?? ""),
+                        cardName: settings?.cardName?.trim() ?? "",
                       }))
                     }
                   />
@@ -373,23 +363,68 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                 {cardFormat !== "SingleUseVirtual" ? (
                   <Tile title={large ? t("card.settings.spendingLimit") : undefined}>
                     <View style={large ? styles.sliderContainerLarge : styles.sliderContainer}>
-                      <LakeSlider
+                      <LakeLabel
                         label={t("card.settings.spendingLimit")}
-                        value={Number(currentSettings.spendingLimit.amount.value)}
-                        min={0}
-                        max={spendingLimitMaxValue}
-                        step={1}
-                        unit="€"
-                        disabled={!canManageCards}
-                        onChange={value =>
-                          setCurrentSettings(settings => ({
-                            ...settings,
-                            spendingLimit: {
-                              ...settings.spendingLimit,
-                              amount: { ...settings.spendingLimit.amount, value: String(value) },
-                            },
-                          }))
-                        }
+                        render={id => (
+                          <ResponsiveContainer
+                            breakpoint={breakpoints.tiny}
+                            style={styles.container}
+                          >
+                            {({ large }) =>
+                              large ? (
+                                <>
+                                  <Box
+                                    direction="row"
+                                    justifyContent="end"
+                                    style={styles.sliderInput}
+                                  >
+                                    <View>
+                                      <LakeTextInput
+                                        style={styles.input}
+                                        unit={"€"}
+                                        value={dirtyValue}
+                                        onChangeText={setDirtyValue}
+                                        onBlur={sanitizeInput}
+                                        inputMode="decimal"
+                                        disabled={!canUpdateCard}
+                                      />
+                                    </View>
+                                  </Box>
+
+                                  <LakeSlider
+                                    value={Number(currentSettings.spendingLimit.amount.value)}
+                                    min={0}
+                                    max={spendingLimitMaxValue}
+                                    step={1}
+                                    disabled={!canUpdateCard}
+                                    onChange={value =>
+                                      setCurrentSettings(settings => ({
+                                        ...settings,
+                                        spendingLimit: {
+                                          ...settings.spendingLimit,
+                                          amount: {
+                                            ...settings.spendingLimit.amount,
+                                            value: String(value),
+                                          },
+                                        },
+                                      }))
+                                    }
+                                  />
+                                </>
+                              ) : (
+                                <LakeTextInput
+                                  id={id}
+                                  unit={"€"}
+                                  value={dirtyValue}
+                                  onChangeText={setDirtyValue}
+                                  onBlur={sanitizeInput}
+                                  inputMode="decimal"
+                                  disabled={!canUpdateCard}
+                                />
+                              )
+                            }
+                          </ResponsiveContainer>
+                        )}
                       />
                     </View>
 
@@ -402,7 +437,7 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                           id={id}
                           items={PERIODS}
                           value={currentSettings.spendingLimit.period}
-                          disabled={!canManageCards}
+                          disabled={!canUpdateCard}
                           onValueChange={period =>
                             setCurrentSettings({
                               ...currentSettings,
@@ -428,9 +463,9 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                           onChangeText={setDirtyValue}
                           onBlur={sanitizeInput}
                           inputMode="decimal"
-                          disabled={!canManageCards}
+                          disabled={!canUpdateCard}
                           error={
-                            validation?.includes("InvalidAmount") ?? false
+                            (validation?.includes("InvalidAmount") ?? false)
                               ? t("common.form.invalidAmount")
                               : undefined
                           }
@@ -445,7 +480,7 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
             ) : null}
 
             {cardFormat !== "SingleUseVirtual" ? (
-              <View style={desktop ? styles.booleanTiles : styles.booleanTilesMobile}>
+              <View style={large ? styles.booleanTiles : styles.booleanTilesMobile}>
                 <View style={styles.booleanTile}>
                   <CardWizardSettingsBooleanTile
                     title={t("card.settings.eCommerce")}
@@ -455,8 +490,8 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                     onChange={eCommerce =>
                       setCurrentSettings(settings => ({ ...settings, eCommerce }))
                     }
-                    disabled={!canManageCards}
-                    desktop={desktop}
+                    disabled={!canUpdateCard}
+                    desktop={large}
                   />
                 </View>
 
@@ -469,8 +504,8 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                     onChange={withdrawal =>
                       setCurrentSettings(settings => ({ ...settings, withdrawal }))
                     }
-                    disabled={!canManageCards}
-                    desktop={desktop}
+                    disabled={!canUpdateCard}
+                    desktop={large}
                   />
                 </View>
 
@@ -483,8 +518,8 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                     onChange={nonMainCurrencyTransactions =>
                       setCurrentSettings(settings => ({ ...settings, nonMainCurrencyTransactions }))
                     }
-                    disabled={!canManageCards}
-                    desktop={desktop}
+                    disabled={!canUpdateCard}
+                    desktop={large}
                   />
                 </View>
 
@@ -497,8 +532,8 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                     onChange={international =>
                       setCurrentSettings(settings => ({ ...settings, international }))
                     }
-                    disabled={!canManageCards}
-                    desktop={desktop}
+                    disabled={!canUpdateCard}
+                    desktop={large}
                   />
                 </View>
               </View>
@@ -516,7 +551,7 @@ export const CardWizardSettings = forwardRef<CardWizardSettingsRef, Props>(
                     },
                   })
                 }
-                disabled={!canManageCards}
+                disabled={!canUpdateCard}
                 renderItem={period => {
                   return (
                     <View style={styles.item}>

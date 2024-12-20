@@ -1,7 +1,8 @@
 import { AsyncData, Result } from "@swan-io/boxed";
 import { LakeCombobox } from "@swan-io/lake/src/components/LakeCombobox";
 import { colors, texts } from "@swan-io/lake/src/constants/design";
-import { RefObject, useEffect, useState } from "react";
+import { useDebounce } from "@swan-io/lake/src/hooks/useDebounce";
+import { RefObject, forwardRef, useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, TextInput } from "react-native";
 import { CompanySuggestion, queryCompanies } from "../utils/Pappers";
 import { t } from "../utils/i18n";
@@ -28,67 +29,64 @@ type Props = {
   onValueChange: (value: string) => void;
   onSuggestion?: (suggestion: CompanySuggestion) => void;
   onLoadError: (error: unknown) => void;
-  ref: RefObject<TextInput>;
 };
 
 type State = AsyncData<Result<CompanySuggestion[], unknown>>;
 
-export const LakeCompanyInput = ({
-  id,
-  value,
-  placeholder,
-  disabled,
-  error,
-  onValueChange,
-  onSuggestion,
-  onLoadError,
-  ref,
-}: Props) => {
-  const [state, setState] = useState<State>(AsyncData.NotAsked());
+export const LakeCompanyInput = forwardRef<TextInput, Props>(
+  ({ id, value, placeholder, disabled, error, onValueChange, onSuggestion, onLoadError }, ref) => {
+    const [state, setState] = useState<State>(AsyncData.NotAsked());
 
-  const selectCompany = (suggestion: CompanySuggestion) => {
-    onSuggestion?.(suggestion);
-  };
+    const selectCompany = (suggestion: CompanySuggestion) => {
+      onSuggestion?.(suggestion);
+    };
 
-  useEffect(() => {
-    if (value.length <= 3) {
-      return setState(AsyncData.NotAsked());
-    }
+    const query = useCallback(
+      (search: string) => {
+        queryCompanies(search)
+          .tapError(onLoadError)
+          .onResolve(value => setState(AsyncData.Done(value)));
+      },
+      [onLoadError],
+    );
 
-    setState(AsyncData.Loading());
+    const debouncedQueryCompanies = useDebounce(query, 500);
 
-    const request = queryCompanies(value);
+    useEffect(() => {
+      if (value.length <= 3) {
+        return setState(AsyncData.NotAsked());
+      }
 
-    request.tapError(onLoadError).onResolve(value => setState(AsyncData.Done(value)));
+      setState(AsyncData.Loading());
+      debouncedQueryCompanies(value);
+    }, [value, debouncedQueryCompanies]);
 
-    return () => request.cancel();
-  }, [value, onLoadError]);
+    return (
+      <LakeCombobox
+        id={id}
+        inputRef={ref as RefObject<unknown>}
+        placeholder={placeholder ?? t("companyInput.placeholder")}
+        value={value}
+        items={state}
+        keyExtractor={item => item.siren}
+        icon="search-filled"
+        emptyResultText={t("common.noResult")}
+        disabled={disabled}
+        error={error}
+        onValueChange={onValueChange}
+        onSelectItem={selectCompany}
+        renderItem={item => (
+          <>
+            <Text numberOfLines={1} style={styles.itemTitle}>
+              {item.siren} - {item.name}
+            </Text>
 
-  return (
-    <LakeCombobox
-      id={id}
-      inputRef={ref}
-      placeholder={placeholder ?? t("companyInput.placeholder")}
-      value={value}
-      items={state}
-      keyExtractor={item => item.siren}
-      icon="search-filled"
-      emptyResultText={t("common.noResult")}
-      disabled={disabled}
-      error={error}
-      onValueChange={onValueChange}
-      onSelectItem={selectCompany}
-      renderItem={item => (
-        <>
-          <Text numberOfLines={1} style={styles.itemTitle}>
-            {item.siren} - {item.name}
-          </Text>
-
-          <Text numberOfLines={1} style={styles.itemSubtitle}>
-            {item.city}
-          </Text>
-        </>
-      )}
-    />
-  );
-};
+            <Text numberOfLines={1} style={styles.itemSubtitle}>
+              {item.city}
+            </Text>
+          </>
+        )}
+      />
+    );
+  },
+);

@@ -1,26 +1,29 @@
-import { Array, Option } from "@swan-io/boxed";
 import { Link } from "@swan-io/chicane";
+import { useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
-import {
-  FixedListViewEmpty,
-  PlainListViewPlaceholder,
-} from "@swan-io/lake/src/components/FixedListView";
+import { EmptyView } from "@swan-io/lake/src/components/EmptyView";
 import { FullViewportLayer } from "@swan-io/lake/src/components/FullViewportLayer";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
+import { PlainListViewPlaceholder } from "@swan-io/lake/src/components/PlainListView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { isNotNullish, nullishOrEmptyToUndefined } from "@swan-io/lake/src/utils/nullish";
 import { useMemo } from "react";
-import { StyleSheet, View } from "react-native";
-import { match } from "ts-pattern";
-import { AccountMembershipFragment, CardListPageWithoutAccountDocument } from "../graphql/partner";
+import { StyleSheet } from "react-native";
+import { isMatching, P } from "ts-pattern";
+import { Except } from "type-fest";
+import {
+  AccountMembershipCardListPageDocument,
+  AccountMembershipFragment,
+} from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { t } from "../utils/i18n";
-import { Router } from "../utils/routes";
+import { GetRouteParams, Router } from "../utils/routes";
 import { CardList } from "./CardList";
 import { CardFilters, CardListFilter } from "./CardListFilter";
 import { CardWizard } from "./CardWizard";
+import { Connection } from "./Connection";
 import { ErrorView } from "./ErrorView";
 
 const styles = StyleSheet.create({
@@ -34,26 +37,13 @@ const styles = StyleSheet.create({
   filtersLarge: {
     paddingHorizontal: spacings[40],
   },
-  empty: {
-    flexGrow: 1,
-    justifyContent: "center",
-  },
 });
 
 type Props = {
-  canAddCard: boolean;
   currentUserAccountMembershipId: string;
   currentUserAccountMembership: AccountMembershipFragment;
-  editingAccountMembershipId: string;
   editingAccountMembership: AccountMembershipFragment;
-  totalDisplayableCardCount: number;
-  params: {
-    cardSearch?: string | undefined;
-    cardStatus?: string | undefined;
-    cardType?: string[] | undefined;
-  };
-  isCardWizardOpen: boolean;
-  physicalCardOrderVisible: boolean;
+  params: Except<GetRouteParams<"AccountMembersDetailsCardList">, "accountMembershipId">;
 };
 
 const PER_PAGE = 20;
@@ -62,59 +52,53 @@ const ACTIVE_STATUSES = ["Processing" as const, "Enabled" as const];
 const CANCELED_STATUSES = ["Canceling" as const, "Canceled" as const];
 
 export const AccountMembersDetailsCardList = ({
-  canAddCard,
   currentUserAccountMembershipId,
   currentUserAccountMembership,
-  editingAccountMembershipId,
   editingAccountMembership,
-  totalDisplayableCardCount,
   params,
-  isCardWizardOpen,
-  physicalCardOrderVisible,
 }: Props) => {
-  const filters: CardFilters = useMemo(() => {
-    return {
-      search: params.cardSearch,
-      status: match(params.cardStatus)
-        .with("Active", "Canceled", item => item)
-        .otherwise(() => "Active"),
-      type: isNotNullish(params.cardType)
-        ? Array.filterMap(params.cardType, item =>
-            match(item)
-              .with("Virtual", "VirtualAndPhysical", "SingleUseVirtual", item => Option.Some(item))
-              .otherwise(() => Option.None()),
-          )
-        : undefined,
-    } as const;
-  }, [params.cardSearch, params.cardStatus, params.cardType]);
+  const isCardWizardOpen = params.newCard != null;
+  const { canAddCard, canAddCardForOtherMemberships } = usePermissions();
+  const isUserOwnMembership = currentUserAccountMembership.id === editingAccountMembership.id;
 
-  const hasFilters = Object.values(filters).some(isNotNullish);
+  const showAddCard = canAddCard && (isUserOwnMembership || canAddCardForOtherMemberships);
 
-  const statuses = match(filters.status)
-    .with("Active", () => ACTIVE_STATUSES)
-    .with("Canceled", () => CANCELED_STATUSES)
-    .exhaustive();
+  const filters = useMemo<CardFilters>(
+    () => ({
+      type: params.cardType?.filter(
+        isMatching(P.union("Virtual", "VirtualAndPhysical", "SingleUseVirtual")),
+      ),
+    }),
+    [params.cardType],
+  );
 
-  const { data, nextData, reload, setAfter } = useUrqlPaginatedQuery(
+  const search = nullishOrEmptyToUndefined(params.cardSearch);
+  const status = params.cardStatus === "Canceled" ? "Canceled" : "Active";
+
+  const hasSearchOrFilters =
+    isNotNullish(search) || status === "Canceled" || Object.values(filters).some(isNotNullish);
+
+  const [data, { isLoading, reload, setVariables }] = useQuery(
+    AccountMembershipCardListPageDocument,
     {
-      query: CardListPageWithoutAccountDocument,
-      variables: {
-        first: PER_PAGE,
-        filters: { statuses, types: filters.type, search: filters.search },
-        accountMembershipId: editingAccountMembershipId,
+      first: PER_PAGE,
+      accountMembershipId: params.editingAccountMembershipId,
+      filters: {
+        statuses: status === "Active" ? ACTIVE_STATUSES : CANCELED_STATUSES,
+        types: filters.type,
+        search,
       },
     },
-    [filters],
   );
 
   const empty = (
-    <FixedListViewEmpty
+    <EmptyView
       icon="lake-card"
       borderedIcon={true}
       title={t("cardList.noResults")}
       subtitle={t("cardList.noResultsDescription")}
     >
-      {canAddCard ? (
+      {showAddCard ? (
         <LakeButtonGroup>
           <LakeButton
             size="small"
@@ -123,7 +107,6 @@ export const AccountMembersDetailsCardList = ({
             onPress={() =>
               Router.push("AccountMembersDetailsCardList", {
                 accountMembershipId: currentUserAccountMembershipId,
-                editingAccountMembershipId,
                 ...params,
                 newCard: "",
               })
@@ -133,117 +116,131 @@ export const AccountMembersDetailsCardList = ({
           </LakeButton>
         </LakeButtonGroup>
       ) : null}
-    </FixedListViewEmpty>
+    </EmptyView>
   );
 
   return (
     <>
-      {totalDisplayableCardCount === 0 ? (
-        <View style={styles.empty}>{empty}</View>
-      ) : (
-        <ResponsiveContainer style={styles.root} breakpoint={breakpoints.large}>
-          {({ large }) => (
-            <>
-              <Box style={[styles.filters, large && styles.filtersLarge]}>
-                <CardListFilter
-                  filters={filters}
-                  onChange={filters =>
-                    Router.push("AccountMembersDetailsCardList", {
-                      accountMembershipId: currentUserAccountMembershipId,
-                      editingAccountMembershipId,
-                      ...params,
-                      cardSearch: filters.search,
-                      cardStatus: filters.status,
-                      cardType: filters.type,
-                    })
-                  }
-                  onRefresh={reload}
-                  large={large}
-                >
-                  {canAddCard ? (
-                    <LakeButton
-                      size="small"
-                      icon="add-circle-filled"
-                      color="current"
-                      onPress={() =>
-                        Router.push("AccountMembersDetailsCardList", {
-                          accountMembershipId: currentUserAccountMembershipId,
-                          editingAccountMembershipId,
-                          ...params,
-                          newCard: "",
-                        })
-                      }
-                    >
-                      {t("common.new")}
-                    </LakeButton>
-                  ) : null}
-                </CardListFilter>
-              </Box>
+      <ResponsiveContainer style={styles.root} breakpoint={breakpoints.large}>
+        {({ large }) => (
+          <>
+            <Box style={[styles.filters, large && styles.filtersLarge]}>
+              <CardListFilter
+                large={large}
+                filters={filters}
+                search={search}
+                status={status}
+                onRefresh={reload}
+                onChangeFilters={filters => {
+                  Router.replace("AccountMembersDetailsCardList", {
+                    accountMembershipId: currentUserAccountMembershipId,
+                    ...params,
+                    cardType: filters.type,
+                  });
+                }}
+                onChangeSearch={cardSearch => {
+                  Router.replace("AccountMembersDetailsCardList", {
+                    accountMembershipId: currentUserAccountMembershipId,
+                    ...params,
+                    cardSearch,
+                  });
+                }}
+                onChangeStatus={cardStatus => {
+                  Router.replace("AccountMembersDetailsCardList", {
+                    accountMembershipId: currentUserAccountMembershipId,
+                    ...params,
+                    cardStatus,
+                  });
+                }}
+              >
+                {showAddCard ? (
+                  <LakeButton
+                    size="small"
+                    icon="add-circle-filled"
+                    color="current"
+                    onPress={() =>
+                      Router.push("AccountMembersDetailsCardList", {
+                        accountMembershipId: currentUserAccountMembershipId,
+                        ...params,
+                        newCard: "",
+                      })
+                    }
+                  >
+                    {t("common.new")}
+                  </LakeButton>
+                ) : null}
+              </CardListFilter>
+            </Box>
 
-              {data.match({
-                NotAsked: () => null,
-                Loading: () => (
-                  <PlainListViewPlaceholder
-                    count={20}
-                    rowVerticalSpacing={0}
-                    headerHeight={large ? 48 : 0}
-                    rowHeight={104}
-                  />
-                ),
-                Done: result =>
-                  result.match({
-                    Error: error => <ErrorView error={error} />,
-                    Ok: ({ accountMembership }) => (
-                      <CardList
-                        cards={accountMembership?.cards?.edges ?? []}
-                        getRowLink={({ item }) => (
-                          <Link
-                            to={Router.AccountCardsItem({
-                              accountMembershipId: currentUserAccountMembershipId,
-                              cardId: item.id,
-                            })}
-                          />
-                        )}
-                        loading={{
-                          isLoading: nextData.isLoading(),
-                          count: 20,
-                        }}
-                        onRefreshRequest={reload}
-                        onEndReached={() => {
-                          if (accountMembership?.cards.pageInfo.hasNextPage ?? false) {
-                            setAfter(accountMembership?.cards.pageInfo.endCursor ?? undefined);
-                          }
-                        }}
-                        renderEmptyList={() =>
-                          hasFilters ? (
-                            <FixedListViewEmpty
-                              icon="lake-card"
-                              borderedIcon={true}
-                              title={t("cardList.noResultsWithFilters")}
-                              subtitle={t("common.list.noResultsSuggestion")}
+            {data.match({
+              NotAsked: () => null,
+              Loading: () => (
+                <PlainListViewPlaceholder
+                  count={20}
+                  headerHeight={large ? 48 : 0}
+                  rowHeight={104}
+                />
+              ),
+              Done: result =>
+                result.match({
+                  Error: error => <ErrorView error={error} />,
+                  Ok: ({ accountMembership }) => (
+                    <Connection connection={accountMembership?.cards}>
+                      {cards => (
+                        <CardList
+                          large={large}
+                          cards={cards?.edges ?? []}
+                          getRowLink={({ item }) => (
+                            <Link
+                              to={Router.AccountCardsItem({
+                                accountMembershipId: currentUserAccountMembershipId,
+                                cardId: item.id,
+                              })}
                             />
-                          ) : (
-                            empty
-                          )
-                        }
-                      />
-                    ),
-                  }),
-              })}
-            </>
-          )}
-        </ResponsiveContainer>
-      )}
+                          )}
+                          loading={{
+                            isLoading,
+                            count: 20,
+                          }}
+                          onRefreshRequest={() => {
+                            reload();
+                          }}
+                          onEndReached={() => {
+                            if (cards?.pageInfo.hasNextPage ?? false) {
+                              setVariables({
+                                after: cards?.pageInfo.endCursor ?? undefined,
+                              });
+                            }
+                          }}
+                          renderEmptyList={() =>
+                            hasSearchOrFilters ? (
+                              <EmptyView
+                                icon="lake-card"
+                                borderedIcon={true}
+                                title={t("cardList.noResultsWithFilters")}
+                                subtitle={t("common.list.noResultsSuggestion")}
+                              />
+                            ) : (
+                              empty
+                            )
+                          }
+                        />
+                      )}
+                    </Connection>
+                  ),
+                }),
+            })}
+          </>
+        )}
+      </ResponsiveContainer>
 
       <FullViewportLayer visible={isCardWizardOpen}>
         <CardWizard
-          physicalCardOrderVisible={physicalCardOrderVisible}
           accountMembership={currentUserAccountMembership}
           preselectedAccountMembership={editingAccountMembership}
           onPressClose={() => {
             Router.push("AccountMembersDetailsCardList", {
               accountMembershipId: currentUserAccountMembershipId,
-              editingAccountMembershipId,
               ...params,
               newCard: undefined,
             });

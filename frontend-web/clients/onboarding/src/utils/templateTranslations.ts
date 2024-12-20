@@ -1,7 +1,7 @@
+import { ClientError } from "@swan-io/graphql-client";
 import { CountryCCA3 } from "@swan-io/shared-business/src/constants/countries";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
 import { match, P } from "ts-pattern";
-import type { CombinedError } from "urql";
 import { CompanyType } from "../graphql/unauthenticated";
 import { isTranslationKey, t } from "./i18n";
 
@@ -12,7 +12,7 @@ export const getErrorFieldLabel = (field: string) =>
 
 type UpdateOnboardingError =
   | Error
-  | CombinedError
+  | ClientError
   | { __typename: "ForbiddenRejection" }
   | { __typename: "InternalErrorRejection" }
   | { __typename: "ValidationRejection" };
@@ -41,12 +41,6 @@ export const getUpdateOnboardingError = (
         description: t("error.tryAgain"),
       };
     })
-    .with({ networkError: P.any }, () => {
-      return {
-        title: t("error.network"),
-        description: t("error.checkConnection"),
-      };
-    })
     .otherwise(error => {
       return {
         title: translateError(error),
@@ -58,15 +52,15 @@ export const getUpdateOnboardingError = (
 export const getRegistrationNumberName = (country: CountryCCA3, companyType: CompanyType) => {
   const name = match(country)
     .with("AUT", () => "Firmenbuchnummer")
-    .with("BEL", () => "Numéro d'entreprise / Vestigingseenheidsnummer")
+    .with("BEL", () => "CBE or Ondernemingsnummer")
     .with("HRV", () => "Matični broj poslovnog subjekta [MBS]")
     .with("CYP", () => "Αριθμός Μητρώου Εταιρίας Şirket kayıt numarası")
     .with("CZE", () => "Identifikační číslo")
     .with("DNK", () => "CVR-nummer")
     .with("EST", () => "Kood")
     .with("FIN", () => "Y-tunnus")
-    .with("FRA", () => (companyType === "Association" ? "RNA" : "Numéro SIREN"))
-    .with("DEU", () => "Nummer der Firma Registernummer")
+    .with("FRA", () => (companyType === "Association" ? "SIREN or RNA" : "Numéro SIREN"))
+    .with("DEU", () => "Registernummer")
     .with(
       "GRC",
       () => "τον Αριθμό Γενικού Εμπορικού Μητρώου τον Αριθμό Φορολογικού Μητρώου [Α.Φ.Μ.]",
@@ -74,7 +68,7 @@ export const getRegistrationNumberName = (country: CountryCCA3, companyType: Com
     .with("HUN", () => "Cégjegyzékszáma")
     .with("IRL", () => "Company Number")
     .with("ISL", () => "TIN")
-    .with("ITA", () => "Codice fiscale")
+    .with("ITA", () => "REA number")
     .with("LVA", () => "Reģistrācijas numurs")
     .with("LIE", () => "UID")
     .with("LTU", () => "Juridinio asmens kodas")
@@ -94,5 +88,5 @@ export const getRegistrationNumberName = (country: CountryCCA3, companyType: Com
   if (name == null) {
     return "";
   }
-  return ` (${name})`;
+  return `${name}`;
 };

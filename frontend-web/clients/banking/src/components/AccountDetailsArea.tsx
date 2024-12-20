@@ -6,6 +6,8 @@ import { breakpoints, spacings } from "@swan-io/lake/src/constants/design";
 import { useMemo } from "react";
 import { StyleSheet } from "react-native";
 import { P, match } from "ts-pattern";
+import { AccountLanguage } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { AccountDetailsBillingPage } from "../pages/AccountDetailsBillingPage";
 import { AccountDetailsIbanPage } from "../pages/AccountDetailsIbanPage";
 import { AccountDetailsSettingsPage } from "../pages/AccountDetailsSettingsPage";
@@ -21,26 +23,19 @@ const styles = StyleSheet.create({
 });
 
 type Props = {
+  accountMembershipLanguage: AccountLanguage;
   accountId: string;
   accountMembershipId: string;
-  canManageAccountMembership: boolean;
-  virtualIbansVisible: boolean;
-  idVerified: boolean;
-  projectName: string;
-  userStatusIsProcessing: boolean;
   isIndividual: boolean;
 };
 
 export const AccountDetailsArea = ({
+  accountMembershipLanguage,
   accountId,
   accountMembershipId,
-  canManageAccountMembership,
-  virtualIbansVisible,
-  idVerified,
-  projectName,
-  userStatusIsProcessing,
   isIndividual,
 }: Props) => {
+  const { canReadVirtualIBAN } = usePermissions();
   const route = Router.useRoute([
     "AccountDetailsIban",
     "AccountDetailsVirtualIbans",
@@ -54,7 +49,7 @@ export const AccountDetailsArea = ({
         label: t("accountDetails.iban.tab"),
         url: Router.AccountDetailsIban({ accountMembershipId }),
       },
-      ...(virtualIbansVisible
+      ...(canReadVirtualIBAN
         ? [
             {
               label: t("accountDetails.virtualIbans.tab"),
@@ -76,7 +71,7 @@ export const AccountDetailsArea = ({
         url: Router.AccountDetailsSettings({ accountMembershipId }),
       },
     ],
-    [accountMembershipId, virtualIbansVisible, isIndividual],
+    [accountMembershipId, canReadVirtualIBAN, isIndividual],
   );
 
   return (
@@ -92,32 +87,25 @@ export const AccountDetailsArea = ({
 
           {match(route)
             .with({ name: "AccountDetailsIban" }, () => (
-              <AccountDetailsIbanPage
-                accountId={accountId}
-                accountMembershipId={accountMembershipId}
-                idVerified={idVerified}
-                largeBreakpoint={large}
-                userStatusIsProcessing={userStatusIsProcessing}
-              />
+              <AccountDetailsIbanPage accountId={accountId} largeBreakpoint={large} />
             ))
             .with({ name: "AccountDetailsVirtualIbans" }, () => (
               <>
                 <Space height={40} />
-                <AccountDetailsVirtualIbansPage accountId={accountId} />
+                <AccountDetailsVirtualIbansPage accountId={accountId} large={large} />
               </>
             ))
             .with({ name: "AccountDetailsBilling" }, () => (
               <>
                 <Space height={24} />
-                <AccountDetailsBillingPage accountId={accountId} />
+                <AccountDetailsBillingPage accountId={accountId} large={large} />
               </>
             ))
             .with({ name: "AccountDetailsSettings" }, () => (
               <AccountDetailsSettingsPage
-                projectName={projectName}
+                accountMembershipLanguage={accountMembershipLanguage}
                 accountId={accountId}
                 largeBreakpoint={large}
-                canManageAccountMembership={canManageAccountMembership}
               />
             ))
 

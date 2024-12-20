@@ -1,4 +1,5 @@
-import { Option } from "@swan-io/boxed";
+import { AsyncData, Option, Result } from "@swan-io/boxed";
+import { useQuery } from "@swan-io/graphql-client";
 import { Breadcrumbs, BreadcrumbsRoot } from "@swan-io/lake/src/components/Breadcrumbs";
 import { FullViewportLayer } from "@swan-io/lake/src/components/FullViewportLayer";
 import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
@@ -11,18 +12,15 @@ import { isNotNullish, isNullish } from "@swan-io/lake/src/utils/nullish";
 import { Suspense, useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { P, match } from "ts-pattern";
-import { useQuery } from "urql";
-import {
-  AccountAreaQuery,
-  CardCountWithAccountDocument,
-  CardCountWithoutAccountDocument,
-} from "../graphql/partner";
+import { AccountAreaQuery, CardCountDocument } from "../graphql/partner";
+import { usePermissions } from "../hooks/usePermissions";
 import { CardListPage } from "../pages/CardListPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { t } from "../utils/i18n";
 import { Router } from "../utils/routes";
 import { CardItemArea } from "./CardItemArea";
 import { CardWizard } from "./CardWizard";
+import { ErrorView } from "./ErrorView";
 import { Redirect } from "./Redirect";
 
 const styles = StyleSheet.create({
@@ -60,98 +58,24 @@ const styles = StyleSheet.create({
 type Props = {
   accountMembership: NonNullable<AccountAreaQuery["accountMembership"]>;
   accountMembershipId: string;
-  accountId: string | undefined;
-  canAddCard: boolean;
-  canManageCards: boolean;
-  canManageAccountMembership: boolean;
-  cardOrderVisible: boolean;
-  physicalCardOrderVisible: boolean;
-  idVerified: boolean;
-  refetchAccountAreaQuery: () => void;
+  accountId: string;
   userId: string;
-  userStatusIsProcessing: boolean;
 };
 
 const relevantCardsFilter = {
   statuses: ["Enabled" as const, "Processing" as const, "Canceling" as const, "Canceled" as const],
 };
-// This hook is used to query Query.accountMembership.cards OR Query.cards,
-// depending on if we have access to account details (especially its id)
-const useDisplayableCardsInformation = ({
-  accountMembershipId,
-  accountId,
-}: {
-  accountMembershipId: string;
-  accountId: string | undefined;
-}) => {
-  const hasAccountId = isNotNullish(accountId);
 
-  const filtersWithAccount = useMemo(() => {
-    return {
-      statuses: relevantCardsFilter.statuses,
-      accountId,
-    } as const;
-  }, [accountId]);
-
-  const [withAccountQuery] = useQuery({
-    query: CardCountWithAccountDocument,
-    pause: !hasAccountId,
-    variables: {
-      first: 1,
-      filters: filtersWithAccount,
-    },
-  });
-
-  const [withoutAccountQuery] = useQuery({
-    query: CardCountWithoutAccountDocument,
-    pause: hasAccountId,
-    variables: {
-      accountMembershipId,
-      first: 1,
-      filters: relevantCardsFilter,
-    },
-  });
-
-  if (hasAccountId) {
-    return {
-      onlyCardId:
-        withAccountQuery.data?.cards.totalCount === 1
-          ? Option.fromNullable(withAccountQuery.data?.cards.edges[0]?.node.id)
-          : Option.None(),
-      totalDisplayableCardCount: withAccountQuery.data?.cards.totalCount ?? 0,
-    };
-  } else {
-    return {
-      onlyCardId:
-        withoutAccountQuery.data?.accountMembership?.cards.totalCount === 1
-          ? Option.fromNullable(
-              withoutAccountQuery.data?.accountMembership?.cards.edges[0]?.node.id,
-            )
-          : Option.None(),
-      totalDisplayableCardCount: withoutAccountQuery.data?.accountMembership?.cards.totalCount ?? 0,
-    };
-  }
-};
-
-export const CardsArea = ({
-  accountMembership,
-  accountMembershipId,
-  accountId,
-  canAddCard,
-  canManageCards,
-  canManageAccountMembership,
-  cardOrderVisible,
-  physicalCardOrderVisible,
-  idVerified,
-  refetchAccountAreaQuery,
-  userId,
-  userStatusIsProcessing,
-}: Props) => {
+export const CardsArea = ({ accountMembership, accountMembershipId, accountId, userId }: Props) => {
+  const { canAddCard: canOrderCard } = usePermissions();
   const route = Router.useRoute(["AccountCardsList", "AccountCardsItemArea"]);
 
-  const { onlyCardId, totalDisplayableCardCount } = useDisplayableCardsInformation({
-    accountMembershipId,
-    accountId,
+  const [data] = useQuery(CardCountDocument, {
+    first: 1,
+    filters: {
+      statuses: relevantCardsFilter.statuses,
+      accountId,
+    },
   });
 
   const rootLevelCrumbs = useMemo(
@@ -164,113 +88,118 @@ export const CardsArea = ({
     [accountMembershipId],
   );
 
-  if (onlyCardId.isSome() && route?.name !== "AccountCardsItemArea") {
-    return (
-      <Redirect
-        to={Router.AccountCardsItem({
-          accountMembershipId,
-          cardId: onlyCardId.value,
-        })}
-      />
-    );
-  }
-
   if (isNullish(route?.name)) {
     return <NotFoundPage />;
   }
 
-  return (
-    <ResponsiveContainer style={styles.root} breakpoint={breakpoints.large}>
-      {({ large }) => (
-        <BreadcrumbsRoot rootLevelCrumbs={rootLevelCrumbs}>
-          <View style={styles.container} role="main">
-            {totalDisplayableCardCount > 1 ? (
-              <View style={[styles.header, large && styles.headerDesktop]}>
-                <Breadcrumbs />
-              </View>
-            ) : null}
+  return match(
+    data.mapOk(data => ({
+      onlyCardId:
+        data?.cards.totalCount === 1
+          ? Option.fromNullable(data?.cards.edges[0]?.node.id)
+          : Option.None(),
+      totalDisplayableCardCount: data?.cards.totalCount ?? 0,
+    })),
+  )
+    .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => <LoadingView />)
+    .with(AsyncData.P.Done(Result.P.Error(P.select())), error => <ErrorView error={error} />)
+    .with(
+      AsyncData.P.Done(Result.P.Ok(P.select())),
+      ({ onlyCardId, totalDisplayableCardCount }) => {
+        if (onlyCardId.isSome() && route?.name !== "AccountCardsItemArea") {
+          return (
+            <Redirect
+              to={Router.AccountCardsItem({
+                accountMembershipId,
+                cardId: onlyCardId.value,
+              })}
+            />
+          );
+        }
 
-            {onlyCardId.isSome() ? <Space height={24} /> : null}
+        return (
+          <ResponsiveContainer style={styles.root} breakpoint={breakpoints.large}>
+            {({ large }) => (
+              <BreadcrumbsRoot rootLevelCrumbs={rootLevelCrumbs}>
+                <View style={styles.container} role="main">
+                  {totalDisplayableCardCount > 1 ? (
+                    <View style={[styles.header, large && styles.headerDesktop]}>
+                      <Breadcrumbs />
+                    </View>
+                  ) : null}
 
-            <Suspense fallback={<LoadingView color={colors.current[500]} />}>
-              <View style={styles.contents}>
-                {match(route)
-                  .with(
-                    { name: "AccountCardsList" },
-                    ({ params: { accountMembershipId, new: _, ...params } }) => (
-                      <CardListPage
-                        accountMembershipId={accountMembershipId}
-                        canManageCards={canManageCards}
-                        canManageAccountMembership={canManageAccountMembership}
-                        accountId={accountId}
-                        canAddCard={canAddCard}
-                        totalDisplayableCardCount={totalDisplayableCardCount}
-                        params={params}
-                        cardOrderVisible={cardOrderVisible}
-                      />
-                    ),
-                  )
-                  .with({ name: "AccountCardsItemArea" }, ({ params: { cardId } }) => (
-                    <>
-                      {canAddCard && cardOrderVisible && onlyCardId.isSome() ? (
-                        <View style={[styles.addButton, large && styles.addButtonDesktop]}>
-                          <LakeButton
-                            size="small"
-                            icon="add-circle-filled"
-                            color="current"
-                            onPress={() =>
-                              Router.push("AccountCardsItem", {
-                                cardId,
-                                accountMembershipId,
-                                new: "",
-                              })
-                            }
-                          >
-                            {t("common.new")}
-                          </LakeButton>
-                        </View>
-                      ) : null}
+                  {onlyCardId.isSome() ? <Space height={24} /> : null}
 
-                      <CardItemArea
-                        data-testid="user-card-item"
-                        accountMembershipId={accountMembershipId}
-                        userId={userId}
-                        cardId={cardId}
-                        refetchAccountAreaQuery={refetchAccountAreaQuery}
-                        idVerified={idVerified}
-                        userStatusIsProcessing={userStatusIsProcessing}
-                        canManageAccountMembership={canManageAccountMembership}
-                        physicalCardOrderVisible={physicalCardOrderVisible}
-                        large={large}
-                        canViewAccount={accountMembership.canViewAccount}
-                        canManageCards={accountMembership.canManageCards}
-                      />
-                    </>
-                  ))
-                  .with(P.nullish, () => null)
-                  .exhaustive()}
-              </View>
-            </Suspense>
+                  <Suspense fallback={<LoadingView color={colors.current[500]} />}>
+                    <View style={styles.contents}>
+                      {match(route)
+                        .with(
+                          { name: "AccountCardsList" },
+                          ({ params: { accountMembershipId, new: _, ...params } }) => (
+                            <CardListPage
+                              accountMembershipId={accountMembershipId}
+                              accountId={accountId}
+                              totalDisplayableCardCount={totalDisplayableCardCount}
+                              params={params}
+                            />
+                          ),
+                        )
+                        .with({ name: "AccountCardsItemArea" }, ({ params: { cardId } }) => (
+                          <>
+                            {canOrderCard && onlyCardId.isSome() ? (
+                              <View style={[styles.addButton, large && styles.addButtonDesktop]}>
+                                <LakeButton
+                                  size="small"
+                                  icon="add-circle-filled"
+                                  color="current"
+                                  onPress={() =>
+                                    Router.push("AccountCardsItem", {
+                                      cardId,
+                                      accountMembershipId,
+                                      new: "",
+                                    })
+                                  }
+                                >
+                                  {t("common.new")}
+                                </LakeButton>
+                              </View>
+                            ) : null}
 
-            <FullViewportLayer visible={isNotNullish(route?.params.new)}>
-              <CardWizard
-                physicalCardOrderVisible={physicalCardOrderVisible}
-                accountMembership={accountMembership}
-                onPressClose={() => {
-                  match(route)
-                    .with({ name: P.string }, ({ name, params }) => {
-                      Router.push(name === "AccountCardsItemArea" ? "AccountCardsItem" : name, {
-                        ...params,
-                        new: undefined,
-                      });
-                    })
-                    .otherwise(() => {});
-                }}
-              />
-            </FullViewportLayer>
-          </View>
-        </BreadcrumbsRoot>
-      )}
-    </ResponsiveContainer>
-  );
+                            <CardItemArea
+                              data-testid="user-card-item"
+                              accountMembershipId={accountMembershipId}
+                              userId={userId}
+                              cardId={cardId}
+                              large={large}
+                            />
+                          </>
+                        ))
+                        .with(P.nullish, () => null)
+                        .exhaustive()}
+                    </View>
+                  </Suspense>
+
+                  <FullViewportLayer visible={isNotNullish(route?.params.new)}>
+                    <CardWizard
+                      accountMembership={accountMembership}
+                      onPressClose={() => {
+                        match(route)
+                          .with({ name: "AccountCardsList" }, ({ params }) => {
+                            Router.push("AccountCardsList", { ...params, new: undefined });
+                          })
+                          .with({ name: "AccountCardsItemArea" }, ({ params }) => {
+                            Router.push("AccountCardsItem", { ...params, new: undefined });
+                          })
+                          .otherwise(() => {});
+                      }}
+                    />
+                  </FullViewportLayer>
+                </View>
+              </BreadcrumbsRoot>
+            )}
+          </ResponsiveContainer>
+        );
+      },
+    )
+    .exhaustive();
 };

@@ -1,19 +1,18 @@
 import accepts from "@fastify/accepts";
 import cors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
 import replyFrom from "@fastify/reply-from";
 import secureSession from "@fastify/secure-session";
-import sensible from "@fastify/sensible";
+import sensible, { HttpErrorCodes } from "@fastify/sensible";
 import fastifyStatic from "@fastify/static";
 import fastifyView from "@fastify/view";
 import { Array, Future, Option, Result } from "@swan-io/boxed";
 import fastify, { FastifyReply } from "fastify";
 import mustache from "mustache";
-import { Http2SecureServer } from "node:http2";
-// @ts-expect-error
-import languageParser from "fastify-language-parser";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns";
 import fs from "node:fs";
+import { Http2SecureServer } from "node:http2";
 import path from "pathe";
 import { P, match } from "ts-pattern";
 import {
@@ -51,9 +50,9 @@ const OAUTH_STATE_COOKIE_MAX_AGE = 900; // 15 minutes
 
 export type InvitationConfig = {
   accessToken: string;
-  requestLanguage: string;
   inviteeAccountMembershipId: string;
   inviterAccountMembershipId: string;
+  language: string;
 };
 
 type AppConfig = {
@@ -76,14 +75,13 @@ declare module "@fastify/secure-session" {
 declare module "fastify" {
   // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
   interface FastifyRequest {
+    accessToken: string | undefined;
     config: {
       unauthenticatedApiUrl: string;
       partnerApiUrl: string;
       clientId: string;
       clientSecret: string;
     };
-    accessToken: string | undefined;
-    detectedLng: string;
   }
 }
 
@@ -97,8 +95,9 @@ const getPort = (url: string) => {
 
 const BANKING_PORT = getPort(env.BANKING_URL);
 const ONBOARDING_PORT = getPort(env.ONBOARDING_URL);
+const PAYMENT_PORT = getPort(env.PAYMENT_URL);
 
-const ports = new Set([BANKING_PORT, ONBOARDING_PORT]);
+const ports = new Set([BANKING_PORT, ONBOARDING_PORT, PAYMENT_PORT]);
 
 const assertIsBoundToLocalhost = (host: string) => {
   return new Promise((resolve, reject) => {
@@ -117,14 +116,17 @@ export const start = async ({
   sendAccountMembershipInvitation,
   allowedCorsOrigins = [],
 }: AppConfig) => {
+  const BANKING_HOST = new URL(env.BANKING_URL).hostname;
+
   if (mode === "development") {
-    const BANKING_HOST = new URL(env.BANKING_URL).hostname;
     const ONBOARDING_HOST = new URL(env.ONBOARDING_URL).hostname;
+    const PAYMENT_HOST = new URL(env.PAYMENT_URL).hostname;
 
     try {
       await Promise.all([
         assertIsBoundToLocalhost(BANKING_HOST),
         assertIsBoundToLocalhost(ONBOARDING_HOST),
+        assertIsBoundToLocalhost(PAYMENT_HOST),
       ]);
     } catch (err) {
       console.error(err);
@@ -171,7 +173,13 @@ export const start = async ({
         },
       }),
     },
-    genReqId: () => `req-${randomUUID()}`,
+    genReqId: req => {
+      const existingRequestId = req.headers["x-swan-request-id"];
+      if (typeof existingRequestId === "string") {
+        return existingRequestId;
+      }
+      return `req-${randomUUID()}`;
+    },
   });
 
   /**
@@ -198,12 +206,25 @@ export const start = async ({
     },
   });
 
+  await app.register(fastifyHelmet, {
+    crossOriginOpenerPolicy: {
+      policy: "unsafe-none",
+    },
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["*", "data:", "blob:", "'unsafe-inline'"],
+        frameAncestors: ["'self'", env.BANKING_URL],
+      },
+    },
+  });
+
   /**
    * The onboarding uses `BANKING_URL` as API root so that session is preserved
    * when the onboarding flow completes with the OAuth2 flow
    */
   await app.register(cors, {
-    origin: [env.ONBOARDING_URL, env.BANKING_URL, ...allowedCorsOrigins],
+    origin: [env.ONBOARDING_URL, env.BANKING_URL, env.PAYMENT_URL, ...allowedCorsOrigins],
     credentials: true,
   });
 
@@ -214,13 +235,6 @@ export const start = async ({
     engine: {
       mustache,
     },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-  await app.register(languageParser, {
-    order: ["query"],
-    fallbackLng: "en",
-    supportedLngs: ["en", "fr"],
   });
 
   /**
@@ -264,9 +278,9 @@ export const start = async ({
         match({ refreshToken, expiresAt, accessToken })
           .with(
             {
-              refreshToken: P.not(P.nullish),
-              expiresAt: P.not(P.nullish),
-              accessToken: P.not(P.nullish),
+              refreshToken: P.nonNullable,
+              expiresAt: P.nonNullable,
+              accessToken: P.nonNullable,
             },
             ({ expiresAt, accessToken, refreshToken }) => {
               request.session.options({
@@ -289,8 +303,8 @@ export const start = async ({
   });
 
   app.addHook("onRequest", (request, reply, done) => {
-    if (request.url.startsWith("/api/") || !request.url.startsWith("/auth/")) {
-      void reply.header("cache-control", `public, max-age=0`);
+    if (request.url.startsWith("/api/") || request.url.startsWith("/auth/")) {
+      void reply.header("cache-control", `private, max-age=0`);
     }
     done();
   });
@@ -298,7 +312,9 @@ export const start = async ({
   /**
    * Used to proxy Swan GraphQL APIs
    */
-  await app.register(replyFrom);
+  await app.register(replyFrom, {
+    http: {},
+  });
 
   /**
    * Decorates the `reply` object with a `sendFile`
@@ -314,7 +330,7 @@ export const start = async ({
    * An no-op to extend the cookie duration.
    */
   app.post("/api/ping", async (request, reply) => {
-    return reply.header("cache-control", `public, max-age=0`).status(200).send({
+    return reply.header("cache-control", `private, max-age=0`).status(200).send({
       ok: true,
     });
   });
@@ -341,6 +357,20 @@ export const start = async ({
   });
 
   /**
+   * Proxies the Swan "partner-admin" GraphQL API.
+   */
+  app.post("/api/partner-admin", async (request, reply) => {
+    return reply.from(env.PARTNER_ADMIN_API_URL, {
+      rewriteRequestHeaders: (_req, headers) => ({
+        ...headers,
+        ...(request.accessToken != undefined
+          ? { Authorization: `Bearer ${request.accessToken}` }
+          : undefined),
+      }),
+    });
+  });
+
+  /**
    * Starts a new individual onboarding and redirects to the onboarding URL
    * e.g. /onboarding/individual/start?accountCountry=FRA
    */
@@ -355,7 +385,9 @@ export const start = async ({
           onboardIndividualAccountHolder({ accountCountry, projectId }),
         )
         .tapOk(onboardingId => {
-          return reply.redirect(`${env.ONBOARDING_URL}/onboardings/${onboardingId}`);
+          return reply
+            .header("cache-control", `private, max-age=0`)
+            .redirect(`${env.ONBOARDING_URL}/onboardings/${onboardingId}`);
         })
         .tapError(error => {
           match(error)
@@ -390,7 +422,9 @@ export const start = async ({
           onboardCompanyAccountHolder({ accountCountry, projectId }),
         )
         .tapOk(onboardingId => {
-          return reply.redirect(`${env.ONBOARDING_URL}/onboardings/${onboardingId}`);
+          return reply
+            .header("cache-control", `private, max-age=0`)
+            .redirect(`${env.ONBOARDING_URL}/onboardings/${onboardingId}`);
         })
         .tapError(error => {
           match(error)
@@ -425,44 +459,44 @@ export const start = async ({
 
   /**
    * Send an account membership invitation
-   * e.g. /api/invitation/:id/send?inviterAccountMembershipId=1234
+   * e.g. /api/invitation/:inviteeAccountMembershipId/send?inviterAccountMembershipId=1234&lang=en
    */
-  app.post<{ Querystring: Record<string, string>; Params: { inviteeAccountMembershipId: string } }>(
-    "/api/invitation/:inviteeAccountMembershipId/send",
-    async (request, reply) => {
-      const accessToken = request.accessToken;
+  app.post<{
+    Params: { inviteeAccountMembershipId: string };
+    Querystring: Record<string, string>;
+  }>("/api/invitation/:inviteeAccountMembershipId/send", async (request, reply) => {
+    const accessToken = request.accessToken;
 
-      if (accessToken == null) {
-        return reply.status(401).send("Unauthorized");
-      }
-      if (sendAccountMembershipInvitation == null) {
-        return reply.status(400).send("Not implemented");
-      }
+    if (accessToken == null) {
+      return reply.status(401).send("Unauthorized");
+    }
+    if (sendAccountMembershipInvitation == null) {
+      return reply.status(400).send("Not implemented");
+    }
 
-      const inviterAccountMembershipId = request.query.inviterAccountMembershipId;
+    const { inviterAccountMembershipId, lang = "en" } = request.query;
 
-      if (inviterAccountMembershipId == null) {
-        return reply.status(400).send("Missing inviterAccountMembershipId");
-      }
+    if (inviterAccountMembershipId == null) {
+      return reply.status(400).send("Missing inviterAccountMembershipId");
+    }
 
-      try {
-        const result = await sendAccountMembershipInvitation({
-          accessToken,
-          requestLanguage: request.detectedLng,
-          inviteeAccountMembershipId: request.params.inviteeAccountMembershipId,
-          inviterAccountMembershipId,
-        });
-        return reply.send({ success: result });
-      } catch (err) {
-        request.log.error(err);
+    try {
+      const result = await sendAccountMembershipInvitation({
+        accessToken,
+        inviteeAccountMembershipId: request.params.inviteeAccountMembershipId,
+        inviterAccountMembershipId,
+        language: lang,
+      });
+      return reply.send({ success: result });
+    } catch (err) {
+      request.log.error(err);
 
-        return replyWithError(app, request, reply, {
-          status: 400,
-          requestId: String(request.id),
-        });
-      }
-    },
-  );
+      return replyWithError(app, request, reply, {
+        status: 400,
+        requestId: String(request.id),
+      });
+    }
+  });
 
   /**
    * Builds a OAuth2 auth link and redirects to it.
@@ -475,8 +509,12 @@ export const start = async ({
       accountMembershipId,
       identificationLevel,
       projectId,
+      email,
     } = request.query;
-    if (typeof redirectTo === "string" && !redirectTo.startsWith("/")) {
+    if (
+      typeof redirectTo === "string" &&
+      (!redirectTo.startsWith("/") || redirectTo.startsWith("//"))
+    ) {
       return reply.status(403).send("Invalid `redirectTo` param");
     }
 
@@ -525,9 +563,11 @@ export const start = async ({
       createAuthUrl({
         scope: scope.split(" ").filter(item => item != null && item != ""),
         params: {
+          ...(email != null ? { email } : null),
           ...(onboardingId != null ? { onboardingId } : null),
           ...(identificationLevel != null ? { identificationLevel } : null),
           ...(projectId != null ? { projectId } : null),
+          ...(accountMembershipId != null ? { accountMembershipId } : null),
         },
         redirectUri: `${env.BANKING_URL}/auth/callback`,
         state: JSON.stringify(state),
@@ -543,7 +583,7 @@ export const start = async ({
 
     const state = Result.fromExecution<unknown>(() =>
       JSON.parse(request.query.state ?? "{}"),
-    ).getWithDefault({});
+    ).getOr({});
 
     const stateId = request.session.get("state") ?? "UNKNOWN";
 
@@ -600,15 +640,23 @@ export const start = async ({
                             const queryString = new URLSearchParams();
 
                             if (redirectUrl != undefined) {
-                              const authUri = createAuthUrl({
-                                oAuthClientId,
-                                scope: [],
-                                redirectUri: redirectUrl,
-                                state: state ?? onboardingId,
-                                params: {},
-                              });
+                              const redirectHost = new URL(redirectUrl).hostname;
 
-                              queryString.append("redirectUrl", authUri);
+                              // When onboarding from the dashboard, we don't yet have a OAuth2 client,
+                              // so we bypass the second OAuth2 link.
+                              if (redirectHost === BANKING_HOST.replace("banking.", "dashboard.")) {
+                                queryString.append("redirectUrl", redirectUrl);
+                              } else {
+                                const authUri = createAuthUrl({
+                                  oAuthClientId,
+                                  scope: [],
+                                  redirectUri: redirectUrl,
+                                  state: state ?? onboardingId,
+                                  params: {},
+                                });
+
+                                queryString.append("redirectUrl", authUri);
+                              }
                             }
 
                             if (accountMembershipId != undefined) {
@@ -754,6 +802,25 @@ export const start = async ({
   });
 
   /**
+   * Log request issue to mezmo
+   */
+  app.post("/api/errors/report", async (request, reply) => {
+    const success = Option.fromNullable(request.body)
+      .flatMap(body => (typeof body === "string" ? Option.Some(body) : Option.None()))
+      .toResult("Invalid body")
+      .flatMap(body => Result.fromExecution(() => JSON.parse(body) as unknown))
+      .tapOk(body => {
+        request.log.warn({
+          name: "ClientSideError",
+          contents: body,
+        });
+      })
+      .isOk();
+
+    return reply.send({ success });
+  });
+
+  /**
    * Exposes environement variables to the client apps at runtime.
    * The client simply has to load `<script src="/env.js"></script>`
    */
@@ -769,6 +836,7 @@ export const start = async ({
         .otherwise(() => "EMAIL"),
       TGGL_API_KEY: process.env.TGGL_API_KEY,
       BANKING_URL: env.BANKING_URL,
+      PAYMENT_URL: env.PAYMENT_URL,
       SWAN_PROJECT_ID: projectId.match({
         Ok: projectId => projectId,
         Error: () => undefined,
@@ -791,7 +859,7 @@ export const start = async ({
   });
 
   app.get("/health", async (request, reply) => {
-    return reply.header("cache-control", `public, max-age=0`).status(200).send({
+    return reply.header("cache-control", `private, max-age=0`).status(200).send({
       version: packageJson.version,
       date: new Date().toISOString(),
       env: env.NODE_ENV,
@@ -801,8 +869,7 @@ export const start = async ({
   if (mode !== "production") {
     // in dev mode, we boot vite servers that we proxy
     // the additional ports are the ones they need for the livereload web sockets
-    const { additionalPorts } = await startDevServer(app, httpsConfig);
-    additionalPorts.forEach(port => ports.add(String(port)));
+    await startDevServer(app, httpsConfig);
   } else {
     // in production, simply serve the files
     const productionRequestHandler = getProductionRequestHandler();
@@ -812,9 +879,11 @@ export const start = async ({
   app.setErrorHandler((error, request, reply) => {
     request.log.error(error);
 
+    const statusCode = error.statusCode as Exclude<HttpErrorCodes, string>;
+
     // Send error response
     return replyWithError(app, request, reply, {
-      status: 500,
+      status: statusCode ?? 500,
       requestId: String(request.id),
     });
   });

@@ -78,7 +78,6 @@ const frontendConfig = {
   enumsAsTypes: true,
   nonOptionalTypename: true,
   defaultScalarType: "unknown",
-  inlineFragmentTypes: "combine",
 };
 
 const backendConfig = {
@@ -95,27 +94,34 @@ const config: CodegenConfig = {
   },
 
   generates: {
-    [file("../../clients/onboarding/src/graphql/unauthenticated.ts")]: {
-      documents: file("../../clients/onboarding/src/graphql/unauthenticated.gql"),
+    [file("../../clients/payment/src/graphql/unauthenticated.ts")]: {
+      documents: file("../../clients/payment/src/graphql/unauthenticated.gql"),
       schema: file("./dist/unauthenticated-schema.gql"),
-      plugins: frontendPlugins,
+      plugins: frontendPlugins.filter(item => item !== "typescript-urql-graphcache"),
       config: frontendConfig,
       documentTransforms: [{ transform: addTypenames }],
     },
 
-    [file("../../clients/onboarding/src/graphql/introspection.json")]: {
+    [file("../../clients/onboarding/src/graphql/unauthenticated.ts")]: {
+      documents: file("../../clients/onboarding/src/graphql/unauthenticated.gql"),
       schema: file("./dist/unauthenticated-schema.gql"),
-      plugins: ["introspection"],
-      config: { descriptions: false },
-      hooks: {
-        afterOneFileWrite: "yarn tsx scripts/graphql/cleanIntrospectionSchema.ts",
-      },
+      plugins: frontendPlugins.filter(item => item !== "typescript-urql-graphcache"),
+      config: frontendConfig,
+      documentTransforms: [{ transform: addTypenames }],
     },
 
     [file("../../clients/banking/src/graphql/partner.ts")]: {
       documents: file("../../clients/banking/src/graphql/partner.gql"),
       schema: file("./dist/partner-schema.gql"),
-      plugins: frontendPlugins,
+      plugins: frontendPlugins.filter(item => item !== "typescript-urql-graphcache"),
+      config: frontendConfig,
+      documentTransforms: [{ transform: addTypenames }],
+    },
+
+    [file("../../clients/banking/src/graphql/partner-admin.ts")]: {
+      documents: file("../../clients/banking/src/graphql/partner-admin.gql"),
+      schema: file("./dist/partner-admin-schema.gql"),
+      plugins: frontendPlugins.filter(item => item !== "typescript-urql-graphcache"),
       config: frontendConfig,
       documentTransforms: [{ transform: addTypenames }],
     },
@@ -124,17 +130,8 @@ const config: CodegenConfig = {
       documents: file("../../clients/banking/src/graphql/unauthenticated.gql"),
       schema: file("./dist/unauthenticated-schema.gql"),
       config: frontendConfig,
-      plugins: frontendPlugins,
+      plugins: frontendPlugins.filter(item => item !== "typescript-urql-graphcache"),
       documentTransforms: [{ transform: addTypenames }],
-    },
-
-    [file("../../clients/banking/src/graphql/introspection.json")]: {
-      schema: file("./dist/partner-schema.gql"),
-      plugins: ["introspection"],
-      config: { descriptions: false },
-      hooks: {
-        afterOneFileWrite: "yarn tsx scripts/graphql/cleanIntrospectionSchema.ts",
-      },
     },
 
     [file("../../server/src/graphql/partner.ts")]: {

@@ -1,3 +1,5 @@
+import { Option } from "@swan-io/boxed";
+import { useMutation } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Icon } from "@swan-io/lake/src/components/Icon";
 import { LakeCheckbox } from "@swan-io/lake/src/components/LakeCheckbox";
@@ -9,17 +11,17 @@ import { Pressable } from "@swan-io/lake/src/components/Pressable";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { Tile } from "@swan-io/lake/src/components/Tile";
-import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { breakpoints, colors } from "@swan-io/lake/src/constants/design";
 import { useFirstMountState } from "@swan-io/lake/src/hooks/useFirstMountState";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { showToast } from "@swan-io/lake/src/state/toasts";
 import { noop } from "@swan-io/lake/src/utils/function";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { pick } from "@swan-io/lake/src/utils/object";
+import { trim } from "@swan-io/lake/src/utils/string";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
+import { combineValidators, useForm } from "@swan-io/use-form";
 import { useEffect } from "react";
 import { StyleSheet } from "react-native";
-import { combineValidators, hasDefinedKeys, useForm } from "react-ux-form";
 import { match } from "ts-pattern";
 import { OnboardingFooter } from "../../components/OnboardingFooter";
 import { OnboardingStepContent } from "../../components/OnboardingStepContent";
@@ -37,11 +39,10 @@ import {
 } from "../../utils/validation";
 
 const styles = StyleSheet.create({
-  tcu: {
-    marginHorizontal: "auto",
-  },
   tcuCheckbox: {
     top: 3, // center checkbox with text
+    flexDirection: "row",
+    alignItems: "center",
   },
   link: {
     color: colors.partner[500],
@@ -76,7 +77,7 @@ export const OnboardingIndividualEmail = ({
   tcuDocumentUri,
   tcuUrl,
 }: Props) => {
-  const [updateResult, updateOnboarding] = useUrqlMutation(UpdateIndividualOnboardingDocument);
+  const [updateOnboarding, updateResult] = useMutation(UpdateIndividualOnboardingDocument);
   const isFirstMount = useFirstMountState();
 
   const haveToAcceptTcu = accountCountry === "DEU";
@@ -84,8 +85,8 @@ export const OnboardingIndividualEmail = ({
   const { Field, submitForm, setFieldError, FieldsListener } = useForm({
     email: {
       initialValue: initialEmail,
+      sanitize: trim,
       validate: combineValidators(validateRequired, validateEmail),
-      sanitize: value => value.trim(),
     },
     tcuAccepted: {
       initialValue: !haveToAcceptTcu, // initialize as accepted if not required
@@ -111,50 +112,51 @@ export const OnboardingIndividualEmail = ({
   };
 
   const onPressNext = () => {
-    submitForm(values => {
-      if (!hasDefinedKeys(values, ["email"])) {
-        return;
-      }
+    submitForm({
+      onSuccess: values => {
+        const option = Option.allFromDict(pick(values, ["email"]));
 
-      updateOnboarding({
-        input: { onboardingId, email: values.email, language: locale.language },
-        language: locale.language,
-      })
-        .mapOk(data => data.unauthenticatedUpdateIndividualOnboarding)
-        .mapOkToResult(filterRejectionsToResult)
-        .tapOk(() => Router.push("Location", { onboardingId }))
-        .tapError(error => {
-          match(error)
-            .with({ __typename: "ValidationRejection" }, error => {
-              const invalidFields = extractServerValidationErrors(error, path =>
-                path[0] === "email" ? "email" : null,
-              );
-              invalidFields.forEach(({ fieldName, code }) => {
-                const message = getValidationErrorMessage(code, values[fieldName]);
-                setFieldError(fieldName, message);
-              });
-            })
-            .otherwise(noop);
+        if (option.isNone()) {
+          return;
+        }
 
-          const errorMessage = getUpdateOnboardingError(error);
-          showToast({
-            variant: "error",
-            title: errorMessage.title,
-            description: errorMessage.description,
+        const currentValues = option.get();
+
+        updateOnboarding({
+          input: { onboardingId, email: currentValues.email, language: locale.language },
+          language: locale.language,
+        })
+          .mapOk(data => data.unauthenticatedUpdateIndividualOnboarding)
+          .mapOkToResult(filterRejectionsToResult)
+          .tapOk(() => Router.push("Location", { onboardingId }))
+          .tapError(error => {
+            match(error)
+              .with({ __typename: "ValidationRejection" }, error => {
+                const invalidFields = extractServerValidationErrors(error, path =>
+                  path[0] === "email" ? "email" : null,
+                );
+                invalidFields.forEach(({ fieldName, code }) => {
+                  const message = getValidationErrorMessage(code, currentValues[fieldName]);
+                  setFieldError(fieldName, message);
+                });
+              })
+              .otherwise(noop);
+
+            showToast({ variant: "error", error, ...getUpdateOnboardingError(error) });
           });
-        });
+      },
     });
   };
 
   return (
     <>
       <OnboardingStepContent>
-        <ResponsiveContainer breakpoint={breakpoints.medium} style={commonStyles.fillNoShrink}>
+        <ResponsiveContainer breakpoint={breakpoints.medium}>
           {({ small }) => (
             <>
               <StepTitle isMobile={small}>{t("individual.step.email.title")}</StepTitle>
               <Space height={small ? 8 : 12} />
-              <LakeText>{t("individual.step.introduction.description")}</LakeText>
+              <LakeText>{t("individual.step.email.description")}</LakeText>
               <Space height={small ? 24 : 32} />
 
               <Tile>
@@ -181,8 +183,8 @@ export const OnboardingIndividualEmail = ({
 
               <Space height={small ? 24 : 32} />
 
-              <Box alignItems="start" style={styles.tcu}>
-                <Box direction="row">
+              <Box alignItems="start">
+                <Box direction="row" justifyContent="start">
                   {haveToAcceptTcu && (
                     <>
                       <Field name="tcuAccepted">
@@ -195,6 +197,30 @@ export const OnboardingIndividualEmail = ({
                             style={styles.tcuCheckbox}
                           >
                             <LakeCheckbox value={value} isError={isNotNullish(error)} />
+                            <Space width={8} />
+
+                            <LakeText>
+                              {formatNestedMessage("step.finalize.terms", {
+                                firstLink: (
+                                  <Link target="blank" to={tcuUrl} style={styles.link}>
+                                    {t("emailPage.firstLink")}
+
+                                    <Icon name="open-filled" size={16} style={styles.linkIcon} />
+                                  </Link>
+                                ),
+                                secondLink: (
+                                  <Link
+                                    target="blank"
+                                    to={tcuDocumentUri ?? "#"}
+                                    style={styles.link}
+                                  >
+                                    {t("emailPage.secondLink", { partner: projectName })}
+
+                                    <Icon name="open-filled" size={16} style={styles.linkIcon} />
+                                  </Link>
+                                ),
+                              })}
+                            </LakeText>
                           </Pressable>
                         )}
                       </Field>
@@ -203,10 +229,9 @@ export const OnboardingIndividualEmail = ({
                     </>
                   )}
 
-                  <LakeText>
-                    {formatNestedMessage(
-                      haveToAcceptTcu ? "step.finalize.terms" : "emailPage.terms",
-                      {
+                  {!haveToAcceptTcu && (
+                    <LakeText>
+                      {formatNestedMessage("emailPage.terms", {
                         firstLink: (
                           <Link target="blank" to={tcuUrl} style={styles.link}>
                             {t("emailPage.firstLink")}
@@ -221,9 +246,9 @@ export const OnboardingIndividualEmail = ({
                             <Icon name="open-filled" size={16} style={styles.linkIcon} />
                           </Link>
                         ),
-                      },
-                    )}
-                  </LakeText>
+                      })}
+                    </LakeText>
+                  )}
                 </Box>
 
                 {haveToAcceptTcu && (

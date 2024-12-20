@@ -1,33 +1,25 @@
-import { Array, AsyncData, Option, Result } from "@swan-io/boxed";
+import { AsyncData, Result } from "@swan-io/boxed";
+import { useQuery } from "@swan-io/graphql-client";
 import { Box } from "@swan-io/lake/src/components/Box";
-import {
-  FixedListViewEmpty,
-  PlainListViewPlaceholder,
-} from "@swan-io/lake/src/components/FixedListView";
+import { EmptyView } from "@swan-io/lake/src/components/EmptyView";
 import { FocusTrapRef } from "@swan-io/lake/src/components/FocusTrap";
 import { ListRightPanel } from "@swan-io/lake/src/components/ListRightPanel";
+import { PlainListViewPlaceholder } from "@swan-io/lake/src/components/PlainListView";
 import { Pressable } from "@swan-io/lake/src/components/Pressable";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
-import { Space } from "@swan-io/lake/src/components/Space";
 import { breakpoints, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+import { isNotNullish, nullishOrEmptyToUndefined } from "@swan-io/lake/src/utils/nullish";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet } from "react-native";
-import { match } from "ts-pattern";
-import {
-  CardPageQuery,
-  CardTransactionsPageDocument,
-  IdentificationStatus,
-} from "../graphql/partner";
-import { getMemberName } from "../utils/accountMembership";
+import { isMatching, match, P } from "ts-pattern";
+import { CardTransactionsPageDocument } from "../graphql/partner";
 import { t } from "../utils/i18n";
-import { Router } from "../utils/routes";
-import { CardItemIdentityVerificationGate } from "./CardItemIdentityVerificationGate";
+import { GetRouteParams, Router } from "../utils/routes";
+import { Connection } from "./Connection";
 import { ErrorView } from "./ErrorView";
 import { TransactionDetail } from "./TransactionDetail";
 import { TransactionList } from "./TransactionList";
-import { TransactionFiltersState, TransactionListFilter } from "./TransactionListFilter";
+import { TransactionFilters, TransactionListFilter } from "./TransactionListFilter";
 
 const styles = StyleSheet.create({
   root: {
@@ -46,32 +38,13 @@ const styles = StyleSheet.create({
 const NUM_TO_RENDER = 20;
 
 type Props = {
-  card: Card;
-  projectId: string;
-  accountMembershipId: string;
-
-  cardId: string;
-
-  isCurrentUserCardOwner: boolean;
-  cardRequiresIdentityVerification: boolean;
-  onRefreshAccountRequest: () => void;
-  identificationStatus?: IdentificationStatus;
-
-  params: {
-    isAfterUpdatedAt?: string | undefined;
-    isBeforeUpdatedAt?: string | undefined;
-    search?: string | undefined;
-    status?: string[] | undefined;
-  };
-
-  canViewAccount: boolean;
+  params: GetRouteParams<"AccountCardsItemTransactions">;
 };
 
 const availableFilters = [
   "isAfterUpdatedAt",
   "isBeforeUpdatedAt",
   "isBeforeUpdatedAt",
-  "search",
   "status",
 ] as const;
 
@@ -82,66 +55,35 @@ const DEFAULT_STATUSES = [
   "Rejected" as const,
 ];
 
-type Card = NonNullable<CardPageQuery["card"]>;
-
-export const CardItemTransactionList = ({
-  card: cardFromProps,
-  cardId,
-  projectId,
-  accountMembershipId,
-  params,
-  isCurrentUserCardOwner,
-  cardRequiresIdentityVerification,
-  onRefreshAccountRequest,
-  identificationStatus,
-  canViewAccount,
-}: Props) => {
-  const filters: TransactionFiltersState = useMemo(() => {
-    return {
+export const CardItemTransactionList = ({ params }: Props) => {
+  const filters = useMemo<TransactionFilters>(
+    () => ({
       isAfterUpdatedAt: params.isAfterUpdatedAt,
       isBeforeUpdatedAt: params.isBeforeUpdatedAt,
-      search: params.search,
       paymentProduct: undefined,
-      status: isNotNullish(params.status)
-        ? Array.filterMap(params.status, item =>
-            match(item)
-              .with("Booked", "Canceled", "Pending", "Rejected", "Released", "Upcoming", item =>
-                Option.Some(item),
-              )
-              .otherwise(() => Option.None()),
-          )
-        : undefined,
-    } as const;
-  }, [params.isAfterUpdatedAt, params.isBeforeUpdatedAt, params.search, params.status]);
-
-  const hasFilters = Object.values(filters).some(isNotNullish);
-
-  const { data, nextData, reload, setAfter } = useUrqlPaginatedQuery(
-    {
-      query: CardTransactionsPageDocument,
-      variables: {
-        cardId,
-        first: NUM_TO_RENDER,
-        filters: {
-          ...filters,
-          paymentProduct: undefined,
-          status: filters.status ?? DEFAULT_STATUSES,
-        },
-        canQueryCardOnTransaction: true,
-        canViewAccount,
-      },
-    },
-    [cardId, filters],
+      status: params.status?.filter(
+        isMatching(P.union("Booked", "Canceled", "Pending", "Rejected", "Released", "Upcoming")),
+      ),
+    }),
+    [params.isAfterUpdatedAt, params.isBeforeUpdatedAt, params.status],
   );
 
-  const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
+  const search = nullishOrEmptyToUndefined(params.search);
+  const hasSearchOrFilters = isNotNullish(search) || Object.values(filters).some(isNotNullish);
 
-  const transactions = data
-    .toOption()
-    .flatMap(result => result.toOption())
-    .flatMap(data => Option.fromNullable(data.card?.transactions))
-    .map(({ edges }) => edges.map(({ node }) => node))
-    .getWithDefault([]);
+  const [data, { isLoading, reload, setVariables }] = useQuery(CardTransactionsPageDocument, {
+    cardId: params.cardId,
+    first: NUM_TO_RENDER,
+    filters: {
+      ...filters,
+      paymentProduct: undefined,
+      search,
+      status: filters.status ?? DEFAULT_STATUSES,
+    },
+    canQueryCardOnTransaction: true,
+  });
+
+  const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
 
   const panelRef = useRef<FocusTrapRef | null>(null);
 
@@ -154,10 +96,10 @@ export const CardItemTransactionList = ({
     <ResponsiveContainer style={styles.root} breakpoint={breakpoints.large}>
       {({ large }) => (
         <>
-          {match({ hasFilters, data })
+          {match({ hasSearchOrFilters, data })
             .with(
               {
-                hasFilters: false,
+                hasSearchOrFilters: false,
                 data: AsyncData.P.Done(Result.P.Ok({ card: { transactions: { totalCount: 0 } } })),
               },
               () => null,
@@ -165,17 +107,17 @@ export const CardItemTransactionList = ({
             .otherwise(() => (
               <Box style={[styles.filters, large && styles.filtersLarge]}>
                 <TransactionListFilter
-                  filters={filters}
-                  onChange={filters =>
-                    Router.push("AccountCardsItemTransactions", {
-                      accountMembershipId,
-                      cardId,
-                      ...filters,
-                    })
-                  }
                   available={availableFilters}
-                  onRefresh={reload}
                   large={large}
+                  filters={filters}
+                  search={search}
+                  onRefresh={reload}
+                  onChangeFilters={filters => {
+                    Router.replace("AccountCardsItemTransactions", { ...params, ...filters });
+                  }}
+                  onChangeSearch={search => {
+                    Router.replace("AccountCardsItemTransactions", { ...params, search });
+                  }}
                 />
               </Box>
             ))}
@@ -185,7 +127,6 @@ export const CardItemTransactionList = ({
             Loading: () => (
               <PlainListViewPlaceholder
                 count={NUM_TO_RENDER}
-                rowVerticalSpacing={0}
                 headerHeight={48}
                 groupHeaderHeight={48}
                 rowHeight={48}
@@ -195,84 +136,71 @@ export const CardItemTransactionList = ({
               result.match({
                 Error: error => <ErrorView error={error} />,
                 Ok: ({ card }) => (
-                  <TransactionList
-                    withStickyTabs={true}
-                    transactions={card?.transactions?.edges ?? []}
-                    getRowLink={({ item }) => (
-                      <Pressable onPress={() => setActiveTransactionId(item.id)} />
-                    )}
-                    pageSize={NUM_TO_RENDER}
-                    activeRowId={activeTransactionId ?? undefined}
-                    onActiveRowChange={onActiveRowChange}
-                    loading={{
-                      isLoading: nextData.isLoading(),
-                      count: 2,
-                    }}
-                    onEndReached={() => {
-                      if (card?.transactions?.pageInfo.hasNextPage ?? false) {
-                        setAfter(card?.transactions?.pageInfo.endCursor ?? undefined);
-                      }
-                    }}
-                    renderEmptyList={() =>
-                      hasFilters ? (
-                        <FixedListViewEmpty
-                          icon="lake-transfer"
-                          borderedIcon={true}
-                          title={t("common.list.noResults")}
-                          subtitle={t("common.list.noResultsSuggestion")}
-                        />
-                      ) : (
-                        <FixedListViewEmpty
-                          icon="lake-transfer"
-                          borderedIcon={true}
-                          title={t("transansactionList.noResults")}
-                        >
-                          {cardRequiresIdentityVerification ? (
-                            <>
-                              <Space height={24} />
-
-                              <CardItemIdentityVerificationGate
-                                recommendedIdentificationLevel={
-                                  card?.accountMembership.recommendedIdentificationLevel ?? "Expert"
-                                }
-                                isCurrentUserCardOwner={isCurrentUserCardOwner}
-                                projectId={projectId}
-                                description={t("card.identityVerification.transactions")}
-                                descriptionForOtherMember={t(
-                                  "card.identityVerification.transactions.otherMember",
-                                  {
-                                    name: getMemberName({
-                                      accountMembership: cardFromProps.accountMembership,
-                                    }),
-                                  },
-                                )}
-                                onComplete={onRefreshAccountRequest}
-                                identificationStatus={identificationStatus}
+                  <Connection connection={card?.transactions}>
+                    {transactions => (
+                      <>
+                        <TransactionList
+                          withStickyTabs={true}
+                          transactions={transactions?.edges ?? []}
+                          getRowLink={({ item }) => (
+                            <Pressable onPress={() => setActiveTransactionId(item.id)} />
+                          )}
+                          pageSize={NUM_TO_RENDER}
+                          activeRowId={activeTransactionId ?? undefined}
+                          onActiveRowChange={onActiveRowChange}
+                          loading={{
+                            isLoading,
+                            count: 2,
+                          }}
+                          onEndReached={() => {
+                            if (transactions?.pageInfo.hasNextPage ?? false) {
+                              setVariables({
+                                after: transactions?.pageInfo.endCursor ?? undefined,
+                              });
+                            }
+                          }}
+                          renderEmptyList={() =>
+                            hasSearchOrFilters ? (
+                              <EmptyView
+                                icon="lake-transfer"
+                                borderedIcon={true}
+                                title={t("common.list.noResults")}
+                                subtitle={t("common.list.noResultsSuggestion")}
                               />
-                            </>
-                          ) : null}
-                        </FixedListViewEmpty>
-                      )
-                    }
-                  />
+                            ) : (
+                              <EmptyView
+                                icon="lake-transfer"
+                                borderedIcon={true}
+                                title={t("transansactionList.noResults")}
+                              />
+                            )
+                          }
+                        />
+
+                        <ListRightPanel
+                          ref={panelRef}
+                          keyExtractor={item => item.id}
+                          activeId={activeTransactionId}
+                          onActiveIdChange={setActiveTransactionId}
+                          onClose={() => setActiveTransactionId(null)}
+                          items={transactions?.edges.map(item => item.node) ?? []}
+                          render={(transaction, large) => (
+                            <TransactionDetail
+                              accountMembershipId={params.accountMembershipId}
+                              large={large}
+                              transactionId={transaction.id}
+                            />
+                          )}
+                          closeLabel={t("common.closeButton")}
+                          previousLabel={t("common.previous")}
+                          nextLabel={t("common.next")}
+                        />
+                      </>
+                    )}
+                  </Connection>
                 ),
               }),
           })}
-
-          <ListRightPanel
-            ref={panelRef}
-            keyExtractor={item => item.id}
-            activeId={activeTransactionId}
-            onActiveIdChange={setActiveTransactionId}
-            onClose={() => setActiveTransactionId(null)}
-            items={transactions}
-            render={(transaction, large) => (
-              <TransactionDetail large={large} transaction={transaction} />
-            )}
-            closeLabel={t("common.closeButton")}
-            previousLabel={t("common.previous")}
-            nextLabel={t("common.next")}
-          />
         </>
       )}
     </ResponsiveContainer>

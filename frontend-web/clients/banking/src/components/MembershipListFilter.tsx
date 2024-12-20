@@ -1,19 +1,21 @@
-import { Dict } from "@swan-io/boxed";
+import { AsyncData, Dict, Future, Result } from "@swan-io/boxed";
 import { Box } from "@swan-io/lake/src/components/Box";
 import { Fill } from "@swan-io/lake/src/components/Fill";
 import { FilterChooser } from "@swan-io/lake/src/components/FilterChooser";
+import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
+import { LakeSearchField } from "@swan-io/lake/src/components/LakeSearchField";
+import { Space } from "@swan-io/lake/src/components/Space";
+import { Tag } from "@swan-io/lake/src/components/Tag";
+import { stubFalse, stubTrue } from "@swan-io/lake/src/utils/function";
+import { emptyToUndefined, isNotNullish } from "@swan-io/lake/src/utils/nullish";
 import {
   FilterCheckboxDef,
   FilterRadioDef,
   FiltersStack,
   FiltersState,
-} from "@swan-io/lake/src/components/Filters";
-import { LakeButton } from "@swan-io/lake/src/components/LakeButton";
-import { LakeSearchField } from "@swan-io/lake/src/components/LakeSearchField";
-import { Space } from "@swan-io/lake/src/components/Space";
-import { Tag } from "@swan-io/lake/src/components/Tag";
-import { isNotNullish } from "@swan-io/lake/src/utils/nullish";
+} from "@swan-io/shared-business/src/components/Filters";
 import { ReactNode, useEffect, useMemo, useState } from "react";
+import { P, match } from "ts-pattern";
 import { AccountMembershipStatus } from "../graphql/partner";
 import { t } from "../utils/i18n";
 
@@ -27,56 +29,55 @@ const statusFilter: FilterCheckboxDef<AccountMembershipStatus> = {
     { value: "Suspended", label: t("memberships.status.temporarilyBlocked") },
     { value: "BindingUserError", label: t("memberships.status.conflictAndLimitedAccess") },
   ],
-  submitText: t("common.filters.apply"),
 };
 
-const canInitiatePaymentsFilter: FilterRadioDef<"true" | "false" | undefined> = {
+const canInitiatePaymentsFilter: FilterRadioDef<boolean | undefined> = {
   type: "radio",
   label: t("membershipList.canInitiatePayments"),
   items: [
     { value: undefined, label: t("common.filters.all") },
-    { value: "true", label: t("common.true") },
-    { value: "false", label: t("common.false") },
+    { value: true, label: t("common.true") },
+    { value: false, label: t("common.false") },
   ],
 };
 
-const canManageAccountMembershipFilter: FilterRadioDef<"true" | "false" | undefined> = {
+const canManageAccountMembershipFilter: FilterRadioDef<boolean | undefined> = {
   type: "radio",
   label: t("membershipList.canManageAccountMembership"),
   items: [
     { value: undefined, label: t("common.filters.all") },
-    { value: "true", label: t("common.true") },
-    { value: "false", label: t("common.false") },
+    { value: true, label: t("common.true") },
+    { value: false, label: t("common.false") },
   ],
 };
 
-const canManageBeneficiariesFilter: FilterRadioDef<"true" | "false" | undefined> = {
+const canManageBeneficiariesFilter: FilterRadioDef<boolean | undefined> = {
   type: "radio",
   label: t("membershipList.canManageBeneficiaries"),
   items: [
     { value: undefined, label: t("common.filters.all") },
-    { value: "true", label: t("common.true") },
-    { value: "false", label: t("common.false") },
+    { value: true, label: t("common.true") },
+    { value: false, label: t("common.false") },
   ],
 };
 
-const canViewAccountFilter: FilterRadioDef<"true" | "false" | undefined> = {
+const canViewAccountFilter: FilterRadioDef<boolean | undefined> = {
   type: "radio",
   label: t("membershipList.canViewAccount"),
   items: [
     { value: undefined, label: t("common.filters.all") },
-    { value: "true", label: t("common.true") },
-    { value: "false", label: t("common.false") },
+    { value: true, label: t("common.true") },
+    { value: false, label: t("common.false") },
   ],
 };
 
-const canManageCardsFilter: FilterRadioDef<"true" | "false" | undefined> = {
+const canManageCardsFilter: FilterRadioDef<boolean | undefined> = {
   type: "radio",
   label: t("membershipList.canManageCards"),
   items: [
     { value: undefined, label: t("common.filters.all") },
-    { value: "true", label: t("common.true") },
-    { value: "false", label: t("common.false") },
+    { value: true, label: t("common.true") },
+    { value: false, label: t("common.false") },
   ],
 };
 
@@ -89,19 +90,24 @@ const filtersDefinition = {
   canManageCards: canManageCardsFilter,
 };
 
-export type MembershipFilters = FiltersState<typeof filtersDefinition> & {
-  search: string | undefined;
-};
+export type MembershipFilters = FiltersState<typeof filtersDefinition>;
 
-type TransactionListFilterProps = {
-  filters: MembershipFilters;
-  onChange: (values: Partial<MembershipFilters>) => void;
-  onRefresh: () => void;
+export const parseBooleanParam = (value: string | undefined) =>
+  match(value)
+    .with("true", stubTrue)
+    .with("false", stubFalse)
+    .otherwise(() => undefined);
+
+type MembershipListFilterProps = {
   available?: readonly (keyof MembershipFilters)[];
   children?: ReactNode;
   large?: boolean;
-  totalCount: number;
-  isFetching: boolean;
+  filters: MembershipFilters;
+  search: string | undefined;
+  totalCount: AsyncData<Result<number, unknown>>;
+  onChangeFilters: (filters: Partial<MembershipFilters>) => void;
+  onRefresh: () => Future<unknown>;
+  onChangeSearch: (search: string | undefined) => void;
 };
 
 const defaultAvailableFilters = [
@@ -114,21 +120,19 @@ const defaultAvailableFilters = [
 ] as const;
 
 export const MembershipListFilter = ({
-  filters,
-  children,
-  onChange,
-  onRefresh,
-  totalCount,
-  isFetching,
-  large = true,
   available = defaultAvailableFilters,
-}: TransactionListFilterProps) => {
-  const filtersWithoutSearch = useMemo(() => {
-    const { search, ...filtersWithoutSearch } = filters;
-    return filtersWithoutSearch;
-  }, [filters]);
+  children,
+  large = true,
+  filters,
+  search,
+  totalCount,
+  onChangeFilters,
+  onRefresh,
+  onChangeSearch,
+}: MembershipListFilterProps) => {
   const availableSet = useMemo(() => new Set(available), [available]);
-  const availableFilters: { name: keyof typeof filtersWithoutSearch; label: string }[] = useMemo(
+
+  const availableFilters: { name: keyof MembershipFilters; label: string }[] = useMemo(
     () =>
       (
         [
@@ -162,7 +166,7 @@ export const MembershipListFilter = ({
   );
 
   const [openFilters, setOpenFilters] = useState(() =>
-    Dict.entries(filtersWithoutSearch)
+    Dict.entries(filters)
       .filter(([, value]) => isNotNullish(value))
       .map(([name]) => name),
   );
@@ -170,12 +174,14 @@ export const MembershipListFilter = ({
   useEffect(() => {
     setOpenFilters(openFilters => {
       const currentlyOpenFilters = new Set(openFilters);
-      const openFiltersNotYetInState = Dict.entries(filtersWithoutSearch)
+      const openFiltersNotYetInState = Dict.entries(filters)
         .filter(([name, value]) => isNotNullish(value) && !currentlyOpenFilters.has(name))
         .map(([name]) => name);
       return [...openFilters, ...openFiltersNotYetInState];
     });
-  }, [filtersWithoutSearch]);
+  }, [filters]);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   return (
     <>
@@ -189,10 +195,9 @@ export const MembershipListFilter = ({
         ) : null}
 
         <FilterChooser
-          filters={filtersWithoutSearch}
+          filters={filters}
           openFilters={openFilters}
           label={t("common.filters")}
-          title={t("common.chooseFilter")}
           onAddFilter={filter => setOpenFilters(openFilters => [...openFilters, filter])}
           availableFilters={availableFilters}
           large={large}
@@ -207,7 +212,11 @@ export const MembershipListFilter = ({
               mode="secondary"
               size="small"
               icon="arrow-counterclockwise-filled"
-              onPress={onRefresh}
+              loading={isRefreshing}
+              onPress={() => {
+                setIsRefreshing(true);
+                onRefresh().tap(() => setIsRefreshing(false));
+              }}
             />
           </>
         ) : null}
@@ -216,9 +225,15 @@ export const MembershipListFilter = ({
 
         <LakeSearchField
           placeholder={t("common.search")}
-          initialValue={filters.search ?? ""}
-          onChangeText={search => onChange({ ...filters, search })}
-          renderEnd={() => (!isFetching ? <Tag>{totalCount}</Tag> : undefined)}
+          initialValue={search ?? ""}
+          onChangeText={text => onChangeSearch(emptyToUndefined(text))}
+          renderEnd={() =>
+            match(totalCount)
+              .with(AsyncData.P.Done(Result.P.Ok(P.select())), totalCount => (
+                <Tag>{totalCount}</Tag>
+              ))
+              .otherwise(() => null)
+          }
         />
       </Box>
 
@@ -226,9 +241,9 @@ export const MembershipListFilter = ({
 
       <FiltersStack
         definition={filtersDefinition}
-        filters={filtersWithoutSearch}
+        filters={filters}
         openedFilters={openFilters}
-        onChangeFilters={value => onChange({ ...value, search: filters.search })}
+        onChangeFilters={onChangeFilters}
         onChangeOpened={setOpenFilters}
       />
     </>

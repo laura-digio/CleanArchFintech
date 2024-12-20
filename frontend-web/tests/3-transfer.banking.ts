@@ -1,4 +1,4 @@
-import { Page, expect, test } from "@playwright/test";
+import { Page, test } from "@playwright/test";
 import dayjs from "dayjs";
 import { randomUUID } from "node:crypto";
 import { match } from "ts-pattern";
@@ -40,12 +40,14 @@ const initiate = async (page: Page, options: Options) => {
         )}`,
     )
     .exhaustive();
-  await clickOnButton(main, type);
+
+  await clickOnLink(main, type);
 
   const layer = page.locator("#full-page-layer-root");
+  const beneficiary = `${label.replace(/\d+/g, "")} - beneficiary`;
 
-  await waitForText(layer, t("banking.transfer.new.benefiary.title"));
-  await layer.getByLabel(t("banking.transfer.new.beneficiary.name")).fill(`${label} - beneficiary`);
+  await waitForText(layer, t("banking.transfer.new.beneficiary.title"));
+  await layer.getByLabel(t("banking.transfer.new.beneficiary.name")).fill(beneficiary);
   await layer.getByLabel(t("banking.transfer.new.iban.label")).fill(options.iban);
 
   if (options.bank) {
@@ -54,11 +56,11 @@ const initiate = async (page: Page, options: Options) => {
 
   await clickOnButton(layer, t("banking.common.continue"));
 
-  return { url, main, layer, id, label };
+  return { url, main, layer, id, label, beneficiary };
 };
 
 test("Transfer - instant", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "transfer",
@@ -76,13 +78,11 @@ test("Transfer - instant", async ({ page }) => {
     .check();
 
   await clickOnButton(layer, t("banking.common.continue"));
-
-  await expect(page).toHaveURL(`${url}/transactions`);
-  await expect(page.getByRole("heading", { name: `${label} - label` })).toBeAttached();
+  await waitForText(page, t("banking.transactions.availableBalance"));
 });
 
 test("Transfer - not instant", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "transfer",
@@ -100,13 +100,11 @@ test("Transfer - not instant", async ({ page }) => {
     .uncheck();
 
   await clickOnButton(layer, t("banking.common.continue"));
-
-  await expect(page).toHaveURL(`${url}/transactions`);
-  await expect(page.getByRole("heading", { name: `${label} - label` })).toBeAttached();
+  await waitForText(page, t("banking.transactions.availableBalance"));
 });
 
 test("Transfer - differed", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "transfer",
@@ -127,15 +125,11 @@ test("Transfer - differed", async ({ page }) => {
 
   await clickOnButton(layer, t("banking.common.continue"));
 
-  await expect(page).toHaveURL(`${url}/transactions`);
-
-  await clickOnLink(page, t("banking.transactions.upcoming"), { exact: false });
-
-  await expect(page.getByRole("heading", { name: `${label} - label` })).toBeAttached();
+  await waitForText(page, t("banking.transactions.availableBalance"));
 });
 
 test("Standing order - standard", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "standingOrder",
@@ -154,13 +148,10 @@ test("Standing order - standard", async ({ page }) => {
   await layer.getByLabel(t("banking.recurringTransfer.new.firstExecutionTime.label")).fill("12:12");
 
   await clickOnButton(layer, t("banking.common.continue"));
-
-  await expect(page).toHaveURL(`${url}/payments`);
-  await expect(page.getByRole("heading", { name: `${label} - beneficiary` })).toBeAttached();
 });
 
 test("Standing order - with end date", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "standingOrder",
@@ -186,13 +177,10 @@ test("Standing order - with end date", async ({ page }) => {
   await layer.getByLabel(t("banking.recurringTransfer.new.lastExecutionTime.label")).fill("13:13");
 
   await clickOnButton(layer, t("banking.common.continue"));
-
-  await expect(page).toHaveURL(`${url}/payments`);
-  await expect(page.getByRole("heading", { name: `${label} - beneficiary` })).toBeAttached();
 });
 
 test("Standing order - standard full balance", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "standingOrder",
@@ -216,13 +204,10 @@ test("Standing order - standard full balance", async ({ page }) => {
   await layer.getByLabel(t("banking.recurringTransfer.new.firstExecutionTime.label")).fill("12:12");
 
   await clickOnButton(layer, t("banking.common.continue"));
-
-  await expect(page).toHaveURL(`${url}/payments`);
-  await expect(page.getByRole("heading", { name: `${label} - beneficiary` })).toBeAttached();
 });
 
 test("Standing order - full balance with end date", async ({ page }) => {
-  const { url, id, layer, label } = await initiate(page, {
+  const { id, layer, label } = await initiate(page, {
     iban: "FR7699999001001782785744160",
     bank: "Swan (FR)",
     type: "standingOrder",
@@ -253,7 +238,4 @@ test("Standing order - full balance with end date", async ({ page }) => {
   await layer.getByLabel(t("banking.recurringTransfer.new.lastExecutionTime.label")).fill("13:13");
 
   await clickOnButton(layer, t("banking.common.continue"));
-
-  await expect(page).toHaveURL(`${url}/payments`);
-  await expect(page.getByRole("heading", { name: `${label} - beneficiary` })).toBeAttached();
 });

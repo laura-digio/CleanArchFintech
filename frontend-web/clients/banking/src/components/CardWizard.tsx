@@ -1,23 +1,22 @@
 import { Array, AsyncData, Future, Option, Result } from "@swan-io/boxed";
+import { ClientError, useMutation, useQuery } from "@swan-io/graphql-client";
 import { LakeButton, LakeButtonGroup } from "@swan-io/lake/src/components/LakeButton";
 import { LakeHeading } from "@swan-io/lake/src/components/LakeHeading";
 import { LoadingView } from "@swan-io/lake/src/components/LoadingView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
+import { ScrollView } from "@swan-io/lake/src/components/ScrollView";
 import { Separator } from "@swan-io/lake/src/components/Separator";
 import { Space } from "@swan-io/lake/src/components/Space";
 import { TransitionView } from "@swan-io/lake/src/components/TransitionView";
 import { commonStyles } from "@swan-io/lake/src/constants/commonStyles";
 import { animations, breakpoints, colors, spacings } from "@swan-io/lake/src/constants/design";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { useUrqlPaginatedQuery } from "@swan-io/lake/src/hooks/useUrqlQuery";
-import { showToast } from "@swan-io/lake/src/state/toasts";
+import { filterRejectionsToResult } from "@swan-io/lake/src/utils/gql";
 import { isNotNullish, isNullish } from "@swan-io/lake/src/utils/nullish";
-import { filterRejectionsToResult } from "@swan-io/lake/src/utils/urql";
+import { showToast } from "@swan-io/shared-business/src/state/toasts";
 import { translateError } from "@swan-io/shared-business/src/utils/i18n";
 import { useRef, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { match } from "ts-pattern";
-import { useQuery } from "urql";
+import { StyleSheet, View } from "react-native";
+import { P, match } from "ts-pattern";
 import {
   AccountMembershipFragment,
   AddCardDocument,
@@ -31,7 +30,6 @@ import {
   CreateMultiConsentDocument,
   GetCardProductsDocument,
   GetCardProductsQuery,
-  GetEligibleCardMembershipsDocument,
   SpendingLimitInput,
 } from "../graphql/partner";
 import { t } from "../utils/i18n";
@@ -148,13 +146,12 @@ const styles = StyleSheet.create({
     marginHorizontal: "auto",
     maxWidth: 1520,
     paddingHorizontal: spacings[24],
-    paddingVertical: spacings[24],
+    paddingVertical: spacings[32],
     width: "100%",
   },
   desktopContents: {
     marginVertical: "auto",
     paddingHorizontal: spacings[96],
-    paddingVertical: spacings[24],
   },
   mobileZonePadding: {
     paddingHorizontal: spacings[24],
@@ -187,7 +184,6 @@ type Props = {
   onPressClose?: () => void;
   accountMembership: AccountMembershipFragment;
   preselectedAccountMembership?: AccountMembershipFragment;
-  physicalCardOrderVisible: boolean;
 };
 
 const Title = ({ visible, children }: { visible: boolean; children: string }) => (
@@ -206,21 +202,20 @@ export const CardWizard = ({
   accountMembership,
   onPressClose,
   preselectedAccountMembership,
-  physicalCardOrderVisible,
 }: Props) => {
-  const [{ data }] = useQuery({
-    query: GetCardProductsDocument,
-    variables: { accountMembershipId: accountMembership.id },
+  const [data, { setVariables }] = useQuery(GetCardProductsDocument, {
+    accountMembershipId: accountMembership.id,
+    first: 20,
   });
 
   const [step, setStep] = useState<Step>(INITIAL_STEP);
 
-  const [, addCards] = useUrqlMutation(AddCardsDocument);
-  const [, addCard] = useUrqlMutation(AddCardDocument);
-  const [, addCardsWithGroupDelivery] = useUrqlMutation(AddCardsWithGroupDeliveryDocument);
-  const [, addSingleUseCards] = useUrqlMutation(AddSingleUseVirtualCardsDocument);
-  const [, addSingleUseCard] = useUrqlMutation(AddSingleUseVirtualCardDocument);
-  const [, createMultiConsent] = useUrqlMutation(CreateMultiConsentDocument);
+  const [addCards] = useMutation(AddCardsDocument);
+  const [addCard] = useMutation(AddCardDocument);
+  const [addCardsWithGroupDelivery] = useMutation(AddCardsWithGroupDeliveryDocument);
+  const [addSingleUseCards] = useMutation(AddSingleUseVirtualCardsDocument);
+  const [addSingleUseCard] = useMutation(AddSingleUseVirtualCardDocument);
+  const [createMultiConsent] = useMutation(CreateMultiConsentDocument);
 
   const addCardsWrapper = (input: AddCardsInput) => {
     setCardOrder(AsyncData.Loading());
@@ -262,7 +257,7 @@ export const CardWizard = ({
           });
         })
         .tapError(error => {
-          showToast({ variant: "error", title: translateError(error) });
+          showToast({ variant: "error", error, title: translateError(error) });
         });
     } else {
       return addCards({ input })
@@ -277,7 +272,7 @@ export const CardWizard = ({
           });
         })
         .tapError(error => {
-          showToast({ variant: "error", title: translateError(error) });
+          showToast({ variant: "error", error, title: translateError(error) });
         });
     }
   };
@@ -314,7 +309,7 @@ export const CardWizard = ({
           });
         })
         .tapError(error => {
-          showToast({ variant: "error", title: translateError(error) });
+          showToast({ variant: "error", error, title: translateError(error) });
         });
     } else {
       return addSingleUseCards({ input })
@@ -329,7 +324,7 @@ export const CardWizard = ({
           });
         })
         .tapError(error => {
-          showToast({ variant: "error", title: translateError(error) });
+          showToast({ variant: "error", error, title: translateError(error) });
         });
     }
   };
@@ -348,7 +343,7 @@ export const CardWizard = ({
     if (cardsRequiringConsent.length === 0) {
       // no need for consent, redirect immediately
       return Future.value(
-        Result.Ok<Option<string>, Error>(
+        Result.Ok<Option<string>, ClientError>(
           Option.Some(
             window.location.origin +
               Router.AccountCardsList({
@@ -389,615 +384,624 @@ export const CardWizard = ({
     AsyncData.NotAsked(),
   );
 
-  const cardProducts = data?.projectInfo.cardProducts ?? [];
-  const accountId = accountMembership.account?.id;
+  return match(data)
+    .with(AsyncData.P.NotAsked, AsyncData.P.Loading, () => <LoadingView />)
+    .with(AsyncData.P.Done(Result.P.Error(P.select())), error => <ErrorView error={error} />)
+    .with(AsyncData.P.Done(Result.P.Ok(P.select())), data => {
+      const cardProducts = data?.projectInfo.cardProducts ?? [];
 
-  // not ideal but we need to keep the hook at top-level
-  const { data: members, setAfter: setMembersAfterCursor } = useUrqlPaginatedQuery(
-    {
-      query: GetEligibleCardMembershipsDocument,
-      variables: {
-        accountId: accountId ?? "",
-        first: 20,
-      },
-    },
-    [accountId],
-  );
+      const canOrderPhysicalCard = step.cardFormat === "VirtualAndPhysical";
 
-  const canOrderPhysicalCard = step.cardFormat === "VirtualAndPhysical";
+      const hasMoreThanOneMember =
+        preselectedAccountMembership != null || data.accountMembership?.account == null
+          ? false
+          : (data.accountMembership?.account?.allMemberships.totalCount ?? 0) > 1;
 
-  if (accountId == null) {
-    return <ErrorView />;
-  }
+      const account = data.accountMembership?.account;
+      const members = data.accountMembership?.account?.memberships;
 
-  if (members.isNotAsked() || members.isLoading()) {
-    return <LoadingView color={colors.current[500]} />;
-  }
+      return (
+        <ResponsiveContainer style={styles.root} breakpoint={breakpoints.medium}>
+          {({ large }) => (
+            <View style={styles.container}>
+              <View style={styles.header}>
+                <View style={[styles.headerContents, !large && styles.mobileZonePadding]}>
+                  {onPressClose != null && (
+                    <>
+                      <LakeButton
+                        mode="tertiary"
+                        icon="dismiss-regular"
+                        onPress={onPressClose}
+                        ariaLabel={t("common.closeButton")}
+                      />
 
-  const account = members
-    .get()
-    .map(({ account }) => account)
-    .getWithDefault(undefined);
+                      <Space width={large ? 32 : 8} />
+                    </>
+                  )}
 
-  const hasMoreThanOneMember =
-    preselectedAccountMembership != null ? false : (account?.allMemberships.totalCount ?? 0) > 1;
+                  <View style={styles.headerTitle}>
+                    <Title visible={step.name === "CardProductType"}>
+                      {t("cardWizard.header.cardProduct")}
+                    </Title>
 
-  return (
-    <ResponsiveContainer style={styles.root} breakpoint={breakpoints.medium}>
-      {({ large }) => (
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <View style={[styles.headerContents, !large && styles.mobileZonePadding]}>
-              {onPressClose != null && (
-                <>
-                  <LakeButton
-                    mode="tertiary"
-                    icon="dismiss-regular"
-                    onPress={onPressClose}
-                    ariaLabel={t("common.closeButton")}
-                  />
+                    <Title visible={step.name === "CardProductFormat"}>
+                      {t("cardWizard.header.cardFormat")}
+                    </Title>
 
-                  <Space width={large ? 32 : 8} />
-                </>
-              )}
+                    <Title visible={step.name === "CardProductSettings"}>
+                      {t("cardWizard.header.cardSettings")}
+                    </Title>
 
-              <View style={styles.headerTitle}>
-                <Title visible={step.name === "CardProductType"}>
-                  {t("cardWizard.header.cardProduct")}
-                </Title>
+                    <Title visible={step.name === "CardProductMembers"}>
+                      {t("cardWizard.header.members")}
+                    </Title>
 
-                <Title visible={step.name === "CardProductFormat"}>
-                  {t("cardWizard.header.cardFormat")}
-                </Title>
+                    <Title visible={step.name === "CardProductDelivery"}>
+                      {t("cardWizard.header.delivery")}
+                    </Title>
 
-                <Title visible={step.name === "CardProductSettings"}>
-                  {t("cardWizard.header.cardSettings")}
-                </Title>
-
-                <Title visible={step.name === "CardProductMembers"}>
-                  {t("cardWizard.header.members")}
-                </Title>
-
-                <Title visible={step.name === "CardProductDelivery"}>
-                  {t("cardWizard.header.delivery")}
-                </Title>
-
-                <Title
-                  visible={
-                    step.name === "CardProductGroupedDelivery" ||
-                    step.name === "CardProductIndividualDelivery"
-                  }
-                >
-                  {t("cardWizard.header.address")}
-                </Title>
+                    <Title
+                      visible={
+                        step.name === "CardProductGroupedDelivery" ||
+                        step.name === "CardProductIndividualDelivery"
+                      }
+                    >
+                      {t("cardWizard.header.address")}
+                    </Title>
+                  </View>
+                </View>
               </View>
-            </View>
-          </View>
 
-          <Separator />
+              <Separator />
 
-          {match(step)
-            .with(
-              { name: "CardProductMembers" },
-              ({
-                cardProduct,
-                cardFormat,
-                cardName,
-                memberships,
-                spendingLimit,
-                eCommerce,
-                withdrawal,
-                international,
-                nonMainCurrencyTransactions,
-              }) =>
-                members != null && (
-                  <CardWizardMembers
-                    ref={cardWizardMembersRef}
-                    initialMemberships={memberships}
-                    setAfter={setMembersAfterCursor}
-                    account={account}
-                    style={styles.container}
-                    contentContainerStyle={[styles.contents, large && styles.desktopContents]}
-                    onSubmit={memberships => {
-                      if (canOrderPhysicalCard) {
-                        if (memberships.length === 1) {
-                          setStep({
-                            name: "CardProductIndividualDelivery",
-                            cardName,
-                            cardProduct,
-                            cardFormat,
-                            memberships,
-                            spendingLimit,
-                            eCommerce,
-                            withdrawal,
-                            international,
-                            nonMainCurrencyTransactions,
-                          });
-                        } else {
-                          setStep({
-                            name: "CardProductDelivery",
-                            cardName,
-                            cardProduct,
-                            cardFormat,
-                            memberships,
-                            spendingLimit,
-                            eCommerce,
-                            withdrawal,
-                            international,
-                            nonMainCurrencyTransactions,
-                          });
-                        }
-                      } else {
-                        if (cardFormat === "SingleUseVirtual") {
-                          addSingleUseCardsWrapper({
-                            cardProductId: cardProduct.id,
-                            consentRedirectUrl:
-                              window.location.origin +
-                              Router.AccountCardsList({
-                                accountMembershipId: accountMembership.id,
-                              }),
-
-                            cards: memberships.map(member => {
-                              return {
-                                name: cardName,
-                                accountMembershipId: member.id,
+              {match(step)
+                .with(
+                  { name: "CardProductMembers" },
+                  ({
+                    cardProduct,
+                    cardFormat,
+                    cardName,
+                    memberships,
+                    spendingLimit,
+                    eCommerce,
+                    withdrawal,
+                    international,
+                    nonMainCurrencyTransactions,
+                  }) =>
+                    members != null && (
+                      <CardWizardMembers
+                        ref={cardWizardMembersRef}
+                        initialMemberships={memberships}
+                        setAfter={after => setVariables({ after })}
+                        account={account}
+                        style={styles.container}
+                        contentContainerStyle={[styles.contents, large && styles.desktopContents]}
+                        onSubmit={memberships => {
+                          if (canOrderPhysicalCard) {
+                            if (memberships.length === 1) {
+                              setStep({
+                                name: "CardProductIndividualDelivery",
+                                cardName,
+                                cardProduct,
+                                cardFormat,
+                                memberships,
                                 spendingLimit,
-                              };
-                            }),
-                          });
-                        } else {
-                          addCardsWrapper({
-                            cardProductId: cardProduct.id,
-                            consentRedirectUrl:
-                              window.location.origin +
-                              Router.AccountCardsList({
-                                accountMembershipId: accountMembership.id,
-                              }),
-                            cards: memberships.map(member => {
-                              return {
-                                accountMembershipId: member.id,
-                                spendingLimit,
-                                name: cardName,
                                 eCommerce,
                                 withdrawal,
                                 international,
                                 nonMainCurrencyTransactions,
-                              };
-                            }),
-                          });
-                        }
-                      }
-                    }}
-                  />
-                ),
-            )
-            .otherwise(step => (
-              <ScrollView
-                style={styles.container}
-                contentContainerStyle={[styles.contents, large && styles.desktopContents]}
-              >
-                {match(step)
-                  .with({ name: "CardProductType" }, ({ cardProduct }) => (
-                    <CardWizardProduct
-                      accountHolderType={
-                        data?.accountMembership?.account?.holder.info.__typename ===
-                        "AccountHolderCompanyInfo"
-                          ? "Company"
-                          : "Individual"
-                      }
-                      ref={cardWizardProductRef}
-                      cardProducts={cardProducts}
-                      initialCardProduct={cardProduct}
-                      onSubmit={cardProduct => setStep({ name: "CardProductFormat", cardProduct })}
-                    />
-                  ))
-                  .with({ name: "CardProductFormat" }, ({ cardProduct, cardFormat }) => (
-                    <CardWizardFormat
-                      ref={cardWizardFormatRef}
-                      cardProduct={cardProduct}
-                      initialCardFormat={cardFormat}
-                      physicalCardOrderVisible={physicalCardOrderVisible}
-                      onSubmit={cardFormat =>
-                        setStep({ name: "CardProductSettings", cardProduct, cardFormat })
-                      }
-                    />
-                  ))
-                  .with(
-                    { name: "CardProductSettings" },
-                    ({
-                      cardName,
-                      cardProduct,
-                      cardFormat,
-                      spendingLimit,
-                      eCommerce,
-                      withdrawal,
-                      international,
-                      nonMainCurrencyTransactions,
-                    }) => (
-                      <CardWizardSettings
-                        canManageCards={accountMembership.canManageCards}
-                        ref={cardWizardSettingsRef}
-                        cardProduct={cardProduct}
-                        cardFormat={cardFormat}
-                        initialSettings={{
-                          cardName,
-                          spendingLimit,
-                          eCommerce,
-                          withdrawal,
-                          international,
-                          nonMainCurrencyTransactions,
-                        }}
-                        accountHolder={accountMembership.account?.holder}
-                        onSubmit={cardSettings => {
-                          if (hasMoreThanOneMember) {
-                            setStep({
-                              name: "CardProductMembers",
-                              cardProduct,
-                              cardFormat,
-                              ...cardSettings,
-                            });
-                          } else {
-                            const memberships =
-                              preselectedAccountMembership != null
-                                ? [preselectedAccountMembership]
-                                : account?.memberships.edges.map(({ node }) => node) ?? [];
-
-                            if (canOrderPhysicalCard) {
+                              });
+                            } else {
                               setStep({
-                                name: "CardProductIndividualDelivery",
+                                name: "CardProductDelivery",
+                                cardName,
                                 cardProduct,
                                 cardFormat,
                                 memberships,
-                                ...cardSettings,
+                                spendingLimit,
+                                eCommerce,
+                                withdrawal,
+                                international,
+                                nonMainCurrencyTransactions,
                               });
-                            } else {
-                              if (cardFormat === "SingleUseVirtual") {
-                                addSingleUseCardsWrapper({
-                                  cardProductId: cardProduct.id,
-                                  consentRedirectUrl:
-                                    window.location.origin +
-                                    Router.AccountCardsList({
-                                      accountMembershipId: accountMembership.id,
-                                    }),
-                                  cards: memberships.map(accountMembership => {
-                                    return {
-                                      name: cardSettings.cardName,
-                                      accountMembershipId: accountMembership.id,
-                                      spendingLimit: cardSettings.spendingLimit,
-                                    };
-                                  }),
-                                });
-                              } else {
-                                addCardsWrapper({
-                                  cardProductId: cardProduct.id,
-                                  consentRedirectUrl:
-                                    window.location.origin +
-                                    Router.AccountCardsList({
-                                      accountMembershipId: accountMembership.id,
-                                    }),
-                                  cards: memberships.map(membership => {
-                                    return {
-                                      accountMembershipId: membership.id,
-                                      spendingLimit: cardSettings.spendingLimit,
-                                      name: cardSettings.cardName,
-                                      eCommerce: cardSettings.eCommerce,
-                                      withdrawal: cardSettings.withdrawal,
-                                      international: cardSettings.international,
-                                      nonMainCurrencyTransactions:
-                                        cardSettings.nonMainCurrencyTransactions,
-                                    };
-                                  }),
-                                });
-                              }
                             }
-                          }
-                        }}
-                      />
-                    ),
-                  )
-                  .with(
-                    { name: "CardProductDelivery" },
-                    ({
-                      cardName,
-                      cardProduct,
-                      cardFormat,
-                      memberships,
-                      spendingLimit,
-                      eCommerce,
-                      withdrawal,
-                      international,
-                      nonMainCurrencyTransactions,
-                    }) => (
-                      <CardWizardDelivery
-                        ref={cardWizardDeliveryRef}
-                        onSubmit={mode => {
-                          if (mode === "Grouped") {
-                            setStep({
-                              name: "CardProductGroupedDelivery",
-                              cardName,
-                              cardProduct,
-                              cardFormat,
-                              memberships,
-                              spendingLimit,
-                              eCommerce,
-                              withdrawal,
-                              international,
-                              nonMainCurrencyTransactions,
-                            });
                           } else {
-                            setStep({
-                              name: "CardProductIndividualDelivery",
-                              cardName,
-                              cardProduct,
-                              cardFormat,
-                              memberships,
-                              spendingLimit,
-                              eCommerce,
-                              withdrawal,
-                              international,
-                              nonMainCurrencyTransactions,
-                            });
-                          }
-                        }}
-                      />
-                    ),
-                  )
-                  .with(
-                    { name: "CardProductGroupedDelivery" },
-                    ({
-                      memberships,
-                      cardProduct,
-                      spendingLimit,
-                      eCommerce,
-                      cardName,
-                      withdrawal,
-                      international,
-                      nonMainCurrencyTransactions,
-                    }) => {
-                      const accountMembership = data?.accountMembership;
-
-                      if (accountMembership?.account == null || accountMembership?.user == null) {
-                        return <ErrorView />;
-                      }
-
-                      return (
-                        <CardWizardGroupedDelivery
-                          ref={cardWizardGroupedDeliveryRef}
-                          members={memberships}
-                          address={{
-                            addressLine1:
-                              accountMembership.account.holder.residencyAddress.addressLine1 ?? "",
-                            addressLine2:
-                              accountMembership.account.holder.residencyAddress.addressLine2,
-                            city: accountMembership.account.holder.residencyAddress.city ?? "",
-                            companyName: match(accountMembership.account.holder)
-                              .with(
-                                { info: { __typename: "AccountHolderCompanyInfo" } },
-                                ({ info: { name } }) => name,
-                              )
-                              .otherwise(() => undefined),
-                            country:
-                              accountMembership.account.holder.residencyAddress.country ?? "",
-                            firstName: accountMembership.user.firstName ?? "",
-                            lastName: accountMembership.user.lastName ?? "",
-                            phoneNumber: accountMembership.user.mobilePhoneNumber ?? "",
-                            postalCode:
-                              accountMembership.account.holder.residencyAddress.postalCode ?? "",
-                            state: accountMembership.account.holder.residencyAddress.state,
-                          }}
-                          onSubmit={groupedDeliveryConfig => {
-                            setCardOrder(AsyncData.Loading());
-
-                            addCardsWithGroupDelivery({
-                              input: {
+                            if (cardFormat === "SingleUseVirtual") {
+                              addSingleUseCardsWrapper({
                                 cardProductId: cardProduct.id,
                                 consentRedirectUrl:
                                   window.location.origin +
                                   Router.AccountCardsList({
                                     accountMembershipId: accountMembership.id,
                                   }),
-                                groupDeliveryAddress: groupedDeliveryConfig.address,
-                                cards: groupedDeliveryConfig.members.map(membership => ({
-                                  accountMembershipId: membership.id,
-                                  spendingLimit,
-                                  eCommerce,
-                                  withdrawal,
-                                  name: cardName,
-                                  international,
-                                  nonMainCurrencyTransactions,
-                                  printPhysicalCard: true,
-                                })),
-                              },
-                            })
-                              .mapOk(data => data.addCardsWithGroupDelivery)
-                              .mapOkToResult(filterRejectionsToResult)
-                              .flatMapOk(data => generateMultiConsent(data.cards))
-                              .tap(() => setCardOrder(AsyncData.NotAsked()))
-                              .tapOk(value => {
-                                value.match({
-                                  Some: consentUrl => window.location.replace(consentUrl),
-                                  None: () => {},
-                                });
-                              })
-                              .tapError(error => {
-                                showToast({ variant: "error", title: translateError(error) });
+
+                                cards: memberships.map(member => {
+                                  return {
+                                    name: cardName,
+                                    accountMembershipId: member.id,
+                                    spendingLimit,
+                                  };
+                                }),
                               });
-                          }}
-                        />
-                      );
-                    },
-                  )
-                  .with(
-                    { name: "CardProductIndividualDelivery" },
-                    ({
-                      memberships,
-                      cardProduct,
-                      spendingLimit,
-                      eCommerce,
-                      cardName,
-                      withdrawal,
-                      international,
-                      nonMainCurrencyTransactions,
-                    }) => {
-                      const accountMembership = data?.accountMembership;
-
-                      if (accountMembership?.account == null || accountMembership?.user == null) {
-                        return <ErrorView />;
-                      }
-
-                      return (
-                        <CardWizardIndividualDelivery
-                          ref={cardWizardIndividualDeliveryRef}
-                          members={memberships}
-                          address={{
-                            addressLine1:
-                              accountMembership.account.holder.residencyAddress.addressLine1 ?? "",
-                            addressLine2:
-                              accountMembership.account.holder.residencyAddress.addressLine2,
-                            city: accountMembership.account.holder.residencyAddress.city ?? "",
-                            companyName: match(accountMembership.account.holder)
-                              .with(
-                                { info: { __typename: "AccountHolderCompanyInfo" } },
-                                ({ info: { name } }) => name,
-                              )
-                              .otherwise(() => undefined),
-                            country:
-                              accountMembership.account.holder.residencyAddress.country ?? "",
-                            firstName: accountMembership.user.firstName ?? "",
-                            lastName: accountMembership.user.lastName ?? "",
-                            phoneNumber: accountMembership.user.mobilePhoneNumber ?? "",
-                            postalCode:
-                              accountMembership.account.holder.residencyAddress.postalCode ?? "",
-                            state: accountMembership.account.holder.residencyAddress.state,
-                          }}
-                          onSubmit={individualDeliveryConfig => {
-                            addCardsWrapper({
-                              cardProductId: cardProduct.id,
-                              consentRedirectUrl:
-                                window.location.origin +
-                                Router.AccountCardsList({
-                                  accountMembershipId: accountMembership.id,
+                            } else {
+                              addCardsWrapper({
+                                cardProductId: cardProduct.id,
+                                consentRedirectUrl:
+                                  window.location.origin +
+                                  Router.AccountCardsList({
+                                    accountMembershipId: accountMembership.id,
+                                  }),
+                                cards: memberships.map(member => {
+                                  return {
+                                    accountMembershipId: member.id,
+                                    spendingLimit,
+                                    name: cardName,
+                                    eCommerce,
+                                    withdrawal,
+                                    international,
+                                    nonMainCurrencyTransactions,
+                                  };
                                 }),
-                              cards: individualDeliveryConfig.map(
-                                ({
-                                  member,
-                                  address: {
-                                    firstName,
-                                    lastName,
-                                    companyName,
-                                    phoneNumber,
-                                    ...address
-                                  },
-                                }) => ({
-                                  accountMembershipId: member.id,
+                              });
+                            }
+                          }
+                        }}
+                      />
+                    ),
+                )
+                .otherwise(step => (
+                  <ScrollView
+                    style={styles.container}
+                    contentContainerStyle={[styles.contents, large && styles.desktopContents]}
+                  >
+                    {match(step)
+                      .with({ name: "CardProductType" }, ({ cardProduct }) => (
+                        <CardWizardProduct
+                          accountHolderType={
+                            data?.accountMembership?.account?.holder.info.__typename ===
+                            "AccountHolderCompanyInfo"
+                              ? "Company"
+                              : "Individual"
+                          }
+                          ref={cardWizardProductRef}
+                          cardProducts={cardProducts}
+                          initialCardProduct={cardProduct}
+                          onSubmit={cardProduct =>
+                            setStep({ name: "CardProductFormat", cardProduct })
+                          }
+                        />
+                      ))
+                      .with({ name: "CardProductFormat" }, ({ cardProduct, cardFormat }) => (
+                        <CardWizardFormat
+                          ref={cardWizardFormatRef}
+                          cardProduct={cardProduct}
+                          initialCardFormat={cardFormat}
+                          onSubmit={cardFormat =>
+                            setStep({ name: "CardProductSettings", cardProduct, cardFormat })
+                          }
+                        />
+                      ))
+                      .with(
+                        { name: "CardProductSettings" },
+                        ({
+                          cardName,
+                          cardProduct,
+                          cardFormat,
+                          spendingLimit,
+                          eCommerce,
+                          withdrawal,
+                          international,
+                          nonMainCurrencyTransactions,
+                        }) => (
+                          <CardWizardSettings
+                            ref={cardWizardSettingsRef}
+                            cardProduct={cardProduct}
+                            cardFormat={cardFormat}
+                            initialSettings={{
+                              cardName,
+                              spendingLimit,
+                              eCommerce,
+                              withdrawal,
+                              international,
+                              nonMainCurrencyTransactions,
+                            }}
+                            accountHolder={accountMembership.account?.holder}
+                            onSubmit={cardSettings => {
+                              if (hasMoreThanOneMember) {
+                                setStep({
+                                  name: "CardProductMembers",
+                                  cardProduct,
+                                  cardFormat,
+                                  ...cardSettings,
+                                });
+                              } else {
+                                const memberships =
+                                  preselectedAccountMembership != null
+                                    ? [preselectedAccountMembership]
+                                    : account != null
+                                      ? (members?.edges.map(({ node }) => node) ?? [])
+                                      : [accountMembership];
+
+                                if (canOrderPhysicalCard) {
+                                  setStep({
+                                    name: "CardProductIndividualDelivery",
+                                    cardProduct,
+                                    cardFormat,
+                                    memberships,
+                                    ...cardSettings,
+                                  });
+                                } else {
+                                  if (cardFormat === "SingleUseVirtual") {
+                                    addSingleUseCardsWrapper({
+                                      cardProductId: cardProduct.id,
+                                      consentRedirectUrl:
+                                        window.location.origin +
+                                        Router.AccountCardsList({
+                                          accountMembershipId: accountMembership.id,
+                                        }),
+                                      cards: memberships.map(accountMembership => {
+                                        return {
+                                          name: cardSettings.cardName,
+                                          accountMembershipId: accountMembership.id,
+                                          spendingLimit: cardSettings.spendingLimit,
+                                        };
+                                      }),
+                                    });
+                                  } else {
+                                    addCardsWrapper({
+                                      cardProductId: cardProduct.id,
+                                      consentRedirectUrl:
+                                        window.location.origin +
+                                        Router.AccountCardsList({
+                                          accountMembershipId: accountMembership.id,
+                                        }),
+                                      cards: memberships.map(membership => {
+                                        return {
+                                          accountMembershipId: membership.id,
+                                          spendingLimit: cardSettings.spendingLimit,
+                                          name: cardSettings.cardName,
+                                          eCommerce: cardSettings.eCommerce,
+                                          withdrawal: cardSettings.withdrawal,
+                                          international: cardSettings.international,
+                                          nonMainCurrencyTransactions:
+                                            cardSettings.nonMainCurrencyTransactions,
+                                        };
+                                      }),
+                                    });
+                                  }
+                                }
+                              }
+                            }}
+                          />
+                        ),
+                      )
+                      .with(
+                        { name: "CardProductDelivery" },
+                        ({
+                          cardName,
+                          cardProduct,
+                          cardFormat,
+                          memberships,
+                          spendingLimit,
+                          eCommerce,
+                          withdrawal,
+                          international,
+                          nonMainCurrencyTransactions,
+                        }) => (
+                          <CardWizardDelivery
+                            ref={cardWizardDeliveryRef}
+                            onSubmit={mode => {
+                              if (mode === "Grouped") {
+                                setStep({
+                                  name: "CardProductGroupedDelivery",
+                                  cardName,
+                                  cardProduct,
+                                  cardFormat,
+                                  memberships,
                                   spendingLimit,
                                   eCommerce,
-                                  name: cardName,
                                   withdrawal,
                                   international,
                                   nonMainCurrencyTransactions,
-                                  physicalCard: {
-                                    deliveryAddress: address,
-                                  },
-                                }),
-                              ),
-                            });
-                          }}
-                        />
-                      );
-                    },
-                  )
-                  .exhaustive()}
-              </ScrollView>
-            ))}
-
-          <View style={styles.buttonsContainer}>
-            <View style={[styles.buttonsContents, !large && styles.mobileZonePadding]}>
-              <LakeButtonGroup>
-                <LakeButton
-                  mode="secondary"
-                  style={styles.button}
-                  onPress={() =>
-                    match(step)
-                      .with({ name: "CardProductType" }, () => onPressClose?.())
-                      .with({ name: "CardProductFormat" }, ({ name, ...rest }) =>
-                        cardProducts.length <= 1
-                          ? onPressClose?.()
-                          : setStep({ name: "CardProductType", ...rest }),
-                      )
-                      .with({ name: "CardProductSettings" }, ({ cardProduct, name, ...rest }) =>
-                        setStep({ name: "CardProductFormat", cardProduct, ...rest }),
-                      )
-                      .with({ name: "CardProductMembers" }, ({ name, ...rest }) =>
-                        setStep({ name: "CardProductSettings", ...rest }),
-                      )
-                      .with({ name: "CardProductDelivery" }, ({ name, ...rest }) =>
-                        setStep({ name: "CardProductMembers", ...rest }),
+                                });
+                              } else {
+                                setStep({
+                                  name: "CardProductIndividualDelivery",
+                                  cardName,
+                                  cardProduct,
+                                  cardFormat,
+                                  memberships,
+                                  spendingLimit,
+                                  eCommerce,
+                                  withdrawal,
+                                  international,
+                                  nonMainCurrencyTransactions,
+                                });
+                              }
+                            }}
+                          />
+                        ),
                       )
                       .with(
                         { name: "CardProductGroupedDelivery" },
-                        { name: "CardProductIndividualDelivery" },
-                        ({ name, ...rest }) =>
-                          setStep(
-                            rest.memberships.length === 1
-                              ? hasMoreThanOneMember
-                                ? { name: "CardProductMembers", ...rest }
-                                : { name: "CardProductSettings", ...rest }
-                              : { name: "CardProductDelivery", ...rest },
-                          ),
-                      )
-                      .otherwise(() => {})
-                  }
-                >
-                  {match(step.name)
-                    .with("CardProductType", () => t("common.cancel"))
-                    .with("CardProductFormat", () =>
-                      cardProducts.length <= 1 ? t("common.cancel") : t("common.previous"),
-                    )
-                    .with("CardProductSettings", () => t("common.previous"))
-                    .with("CardProductMembers", () => t("common.previous"))
-                    .with("CardProductDelivery", () => t("common.previous"))
-                    .otherwise(() => t("common.previous"))}
-                </LakeButton>
+                        ({
+                          memberships,
+                          cardProduct,
+                          spendingLimit,
+                          eCommerce,
+                          cardName,
+                          withdrawal,
+                          international,
+                          nonMainCurrencyTransactions,
+                        }) => {
+                          const accountMembership = data?.accountMembership;
 
-                <LakeButton
-                  mode="primary"
-                  color="current"
-                  style={styles.button}
-                  loading={cardOrder.isLoading()}
-                  onPress={() =>
-                    match(step.name)
-                      .with("CardProductType", () => {
-                        cardWizardProductRef.current?.submit();
-                      })
-                      .with("CardProductFormat", () => {
-                        cardWizardFormatRef.current?.submit();
-                      })
-                      .with("CardProductSettings", () => {
-                        cardWizardSettingsRef.current?.submit();
-                      })
-                      .with("CardProductMembers", () => {
-                        cardWizardMembersRef.current?.submit();
-                      })
-                      .with("CardProductDelivery", () => {
-                        cardWizardDeliveryRef.current?.submit();
-                      })
-                      .with("CardProductGroupedDelivery", () => {
-                        cardWizardGroupedDeliveryRef.current?.submit();
-                      })
-                      .with("CardProductIndividualDelivery", () => {
-                        cardWizardIndividualDeliveryRef.current?.submit();
-                      })
-                      .otherwise(() => {})
-                  }
-                >
-                  {t("common.next")}
-                </LakeButton>
-              </LakeButtonGroup>
+                          if (
+                            accountMembership?.account == null ||
+                            accountMembership?.user == null
+                          ) {
+                            return <ErrorView />;
+                          }
+
+                          return (
+                            <CardWizardGroupedDelivery
+                              ref={cardWizardGroupedDeliveryRef}
+                              members={memberships}
+                              address={{
+                                addressLine1:
+                                  accountMembership.account.holder.residencyAddress.addressLine1 ??
+                                  "",
+                                addressLine2:
+                                  accountMembership.account.holder.residencyAddress.addressLine2,
+                                city: accountMembership.account.holder.residencyAddress.city ?? "",
+                                companyName: match(accountMembership.account.holder)
+                                  .with(
+                                    { info: { __typename: "AccountHolderCompanyInfo" } },
+                                    ({ info: { name } }) => name,
+                                  )
+                                  .otherwise(() => undefined),
+                                country:
+                                  accountMembership.account.holder.residencyAddress.country ?? "",
+                                firstName: accountMembership.user.firstName ?? "",
+                                lastName: accountMembership.user.preferredLastName ?? "",
+                                phoneNumber: accountMembership.user.mobilePhoneNumber ?? "",
+                                postalCode:
+                                  accountMembership.account.holder.residencyAddress.postalCode ??
+                                  "",
+                                state: accountMembership.account.holder.residencyAddress.state,
+                              }}
+                              onSubmit={groupedDeliveryConfig => {
+                                setCardOrder(AsyncData.Loading());
+
+                                addCardsWithGroupDelivery({
+                                  input: {
+                                    cardProductId: cardProduct.id,
+                                    consentRedirectUrl:
+                                      window.location.origin +
+                                      Router.AccountCardsList({
+                                        accountMembershipId: accountMembership.id,
+                                      }),
+                                    groupDeliveryAddress: groupedDeliveryConfig.address,
+                                    cards: groupedDeliveryConfig.members.map(membership => ({
+                                      accountMembershipId: membership.id,
+                                      spendingLimit,
+                                      eCommerce,
+                                      withdrawal,
+                                      name: cardName,
+                                      international,
+                                      nonMainCurrencyTransactions,
+                                      printPhysicalCard: true,
+                                    })),
+                                  },
+                                })
+                                  .mapOk(data => data.addCardsWithGroupDelivery)
+                                  .mapOkToResult(filterRejectionsToResult)
+                                  .flatMapOk(data => generateMultiConsent(data.cards))
+                                  .tap(() => setCardOrder(AsyncData.NotAsked()))
+                                  .tapOk(value => {
+                                    value.match({
+                                      Some: consentUrl => window.location.replace(consentUrl),
+                                      None: () => {},
+                                    });
+                                  })
+                                  .tapError(error => {
+                                    showToast({
+                                      variant: "error",
+                                      error,
+                                      title: translateError(error),
+                                    });
+                                  });
+                              }}
+                            />
+                          );
+                        },
+                      )
+                      .with(
+                        { name: "CardProductIndividualDelivery" },
+                        ({
+                          memberships,
+                          cardProduct,
+                          spendingLimit,
+                          eCommerce,
+                          cardName,
+                          withdrawal,
+                          international,
+                          nonMainCurrencyTransactions,
+                        }) => {
+                          const accountMembership = data?.accountMembership;
+
+                          if (accountMembership?.user == null) {
+                            return <ErrorView />;
+                          }
+
+                          return (
+                            <CardWizardIndividualDelivery
+                              ref={cardWizardIndividualDeliveryRef}
+                              members={memberships}
+                              address={
+                                accountMembership.account == null
+                                  ? undefined
+                                  : {
+                                      addressLine1:
+                                        accountMembership.account.holder.residencyAddress
+                                          .addressLine1 ?? "",
+                                      addressLine2:
+                                        accountMembership.account.holder.residencyAddress
+                                          .addressLine2,
+                                      city:
+                                        accountMembership.account.holder.residencyAddress.city ??
+                                        "",
+                                      companyName: match(accountMembership.account.holder)
+                                        .with(
+                                          { info: { __typename: "AccountHolderCompanyInfo" } },
+                                          ({ info: { name } }) => name,
+                                        )
+                                        .otherwise(() => undefined),
+                                      country:
+                                        accountMembership.account.holder.residencyAddress.country ??
+                                        "",
+                                      firstName: accountMembership.user.firstName ?? "",
+                                      lastName: accountMembership.user.preferredLastName ?? "",
+                                      phoneNumber: accountMembership.user.mobilePhoneNumber ?? "",
+                                      postalCode:
+                                        accountMembership.account.holder.residencyAddress
+                                          .postalCode ?? "",
+                                      state:
+                                        accountMembership.account.holder.residencyAddress.state,
+                                    }
+                              }
+                              onSubmit={individualDeliveryConfig => {
+                                return addCardsWrapper({
+                                  cardProductId: cardProduct.id,
+                                  consentRedirectUrl:
+                                    window.location.origin +
+                                    Router.AccountCardsList({
+                                      accountMembershipId: accountMembership.id,
+                                    }),
+                                  cards: individualDeliveryConfig.map(
+                                    ({
+                                      member,
+                                      choosePin,
+                                      address: {
+                                        firstName,
+                                        lastName,
+                                        companyName,
+                                        phoneNumber,
+                                        ...address
+                                      },
+                                    }) => ({
+                                      accountMembershipId: member.id,
+                                      spendingLimit,
+                                      eCommerce,
+                                      name: cardName,
+                                      withdrawal,
+                                      international,
+                                      nonMainCurrencyTransactions,
+                                      physicalCard: {
+                                        deliveryAddress: address,
+                                        choosePin,
+                                      },
+                                    }),
+                                  ),
+                                });
+                              }}
+                            />
+                          );
+                        },
+                      )
+                      .exhaustive()}
+                  </ScrollView>
+                ))}
+
+              <View style={styles.buttonsContainer}>
+                <View style={[styles.buttonsContents, !large && styles.mobileZonePadding]}>
+                  <LakeButtonGroup>
+                    <LakeButton
+                      mode="secondary"
+                      style={styles.button}
+                      onPress={() =>
+                        match(step)
+                          .with({ name: "CardProductType" }, () => onPressClose?.())
+                          .with({ name: "CardProductFormat" }, ({ name, ...rest }) =>
+                            cardProducts.length <= 1
+                              ? onPressClose?.()
+                              : setStep({ name: "CardProductType", ...rest }),
+                          )
+                          .with({ name: "CardProductSettings" }, ({ cardProduct, name, ...rest }) =>
+                            setStep({ name: "CardProductFormat", cardProduct, ...rest }),
+                          )
+                          .with({ name: "CardProductMembers" }, ({ name, ...rest }) =>
+                            setStep({ name: "CardProductSettings", ...rest }),
+                          )
+                          .with({ name: "CardProductDelivery" }, ({ name, ...rest }) =>
+                            setStep({ name: "CardProductMembers", ...rest }),
+                          )
+                          .with(
+                            { name: "CardProductGroupedDelivery" },
+                            { name: "CardProductIndividualDelivery" },
+                            ({ name, ...rest }) =>
+                              setStep(
+                                rest.memberships.length === 1
+                                  ? hasMoreThanOneMember
+                                    ? { name: "CardProductMembers", ...rest }
+                                    : { name: "CardProductSettings", ...rest }
+                                  : { name: "CardProductDelivery", ...rest },
+                              ),
+                          )
+                          .otherwise(() => {})
+                      }
+                    >
+                      {match(step.name)
+                        .with("CardProductType", () => t("common.cancel"))
+                        .with("CardProductFormat", () =>
+                          cardProducts.length <= 1 ? t("common.cancel") : t("common.previous"),
+                        )
+                        .with("CardProductSettings", () => t("common.previous"))
+                        .with("CardProductMembers", () => t("common.previous"))
+                        .with("CardProductDelivery", () => t("common.previous"))
+                        .otherwise(() => t("common.previous"))}
+                    </LakeButton>
+
+                    <LakeButton
+                      mode="primary"
+                      color="current"
+                      style={styles.button}
+                      loading={cardOrder.isLoading()}
+                      onPress={() =>
+                        match(step.name)
+                          .with("CardProductType", () => {
+                            cardWizardProductRef.current?.submit();
+                          })
+                          .with("CardProductFormat", () => {
+                            cardWizardFormatRef.current?.submit();
+                          })
+                          .with("CardProductSettings", () => {
+                            cardWizardSettingsRef.current?.submit();
+                          })
+                          .with("CardProductMembers", () => {
+                            cardWizardMembersRef.current?.submit();
+                          })
+                          .with("CardProductDelivery", () => {
+                            cardWizardDeliveryRef.current?.submit();
+                          })
+                          .with("CardProductGroupedDelivery", () => {
+                            cardWizardGroupedDeliveryRef.current?.submit();
+                          })
+                          .with("CardProductIndividualDelivery", () => {
+                            cardWizardIndividualDeliveryRef.current?.submit();
+                          })
+                          .otherwise(() => {})
+                      }
+                    >
+                      {t("common.next")}
+                    </LakeButton>
+                  </LakeButtonGroup>
+                </View>
+              </View>
             </View>
-          </View>
-        </View>
-      )}
-    </ResponsiveContainer>
-  );
+          )}
+        </ResponsiveContainer>
+      );
+    })
+    .exhaustive();
 };

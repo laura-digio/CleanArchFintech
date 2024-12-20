@@ -5,34 +5,22 @@ import {
   MobileStepTitle,
   TopLevelStep,
 } from "@swan-io/lake/src/components/LakeStepper";
-import { LoadingView } from "@swan-io/lake/src/components/LoadingView";
 import { ResponsiveContainer } from "@swan-io/lake/src/components/ResponsiveContainer";
 import { Space } from "@swan-io/lake/src/components/Space";
-import { backgroundColor, colors } from "@swan-io/lake/src/constants/design";
+import { backgroundColor } from "@swan-io/lake/src/constants/design";
 import { useBoolean } from "@swan-io/lake/src/hooks/useBoolean";
-import { useUrqlMutation } from "@swan-io/lake/src/hooks/useUrqlMutation";
-import { isNotNullish, isNullish } from "@swan-io/lake/src/utils/nullish";
-import {
-  Document,
-  SupportingDocumentPurpose,
-  uploadableDocumentTypes,
-} from "@swan-io/shared-business/src/components/SupportingDocument";
+import { isNullish } from "@swan-io/lake/src/utils/nullish";
 import {
   companyFallbackCountry,
   isCompanyCountryCCA3,
 } from "@swan-io/shared-business/src/constants/countries";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { StyleSheet } from "react-native";
 import { P, match } from "ts-pattern";
 import logoSwan from "../../assets/imgs/logo-swan.svg";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
-import {
-  CompanyAccountHolderFragment,
-  GetOnboardingQuery,
-  SupportingDocumentPurposeEnum,
-  UpdateCompanyOnboardingDocument,
-} from "../../graphql/unauthenticated";
-import { locale, t } from "../../utils/i18n";
+import { CompanyAccountHolderFragment, GetOnboardingQuery } from "../../graphql/unauthenticated";
+import { t } from "../../utils/i18n";
 import { TrackingProvider } from "../../utils/matomo";
 import { CompanyOnboardingRoute, Router, companyOnboardingRoutes } from "../../utils/routes";
 import { extractServerInvalidFields } from "../../utils/validation";
@@ -56,14 +44,17 @@ import {
 } from "./OnboardingCompanyRegistration";
 
 const styles = StyleSheet.create({
-  container: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: backgroundColor.default,
-  },
   stepper: {
     width: "100%",
     maxWidth: 1280,
     paddingHorizontal: 40,
+  },
+  sticky: {
+    position: "sticky",
+    top: 0,
+    backgroundColor: backgroundColor.default90Transparency,
+    backdropFilter: "blur(4px)",
+    zIndex: 10,
   },
 });
 
@@ -80,7 +71,7 @@ const getNextStep = (
   return Array.findIndex(steps, step => step.id === currentStep)
     .flatMap(index => Option.fromNullable(steps[index + 1]))
     .map(step => step.id)
-    .getWithDefault(currentStep);
+    .getOr(currentStep);
 };
 
 const getPreviousStep = (
@@ -90,10 +81,8 @@ const getPreviousStep = (
   return Array.findIndex(steps, step => step.id === currentStep)
     .flatMap(index => Option.fromNullable(steps[index - 1]))
     .map(step => step.id)
-    .getWithDefault(currentStep);
+    .getOr(currentStep);
 };
-
-const uploadableDocuments: SupportingDocumentPurposeEnum[] = uploadableDocumentTypes;
 
 export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Props) => {
   const route = Router.useRoute(companyOnboardingRoutes);
@@ -107,7 +96,7 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
 
   const ubos = useMemo(() => {
     return onboarding.info.__typename === "OnboardingCompanyAccountHolderInfo"
-      ? onboarding.info.individualUltimateBeneficialOwners ?? []
+      ? (onboarding.info.individualUltimateBeneficialOwners ?? [])
       : [];
   }, [onboarding.info]);
 
@@ -115,7 +104,7 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
   const country = address?.country;
   const companyCountry = isCompanyCountryCCA3(country)
     ? country
-    : accountCountry ?? companyFallbackCountry;
+    : (accountCountry ?? companyFallbackCountry);
   const companyAddressLine1 = address?.addressLine1 ?? "";
   const companyCity = address?.city ?? "";
   const companyPostalCode = address?.postalCode ?? "";
@@ -124,7 +113,7 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
   const legalRepresentativeCountry =
     legalRepresentativeAddress != null && isCompanyCountryCCA3(legalRepresentativeAddress.country)
       ? legalRepresentativeAddress.country
-      : accountCountry ?? companyFallbackCountry;
+      : (accountCountry ?? companyFallbackCountry);
   const legalRepresentativeAddressLine1 = legalRepresentativeAddress?.addressLine1 ?? "";
   const legalRepresentativeCity = legalRepresentativeAddress?.city ?? "";
   const legalRepresentativePostalCode = legalRepresentativeAddress?.postalCode ?? "";
@@ -133,36 +122,30 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
   const companyType = holder.companyType ?? "Company";
   const isRegistered = holder.isRegistered;
 
-  const requiredDocuments =
-    onboarding?.supportingDocumentCollection.requiredSupportingDocumentPurposes
-      .map(d => d.name)
-      .filter(name => uploadableDocuments.includes(name)) ?? [];
-
-  const documents: Document[] =
-    onboarding?.supportingDocumentCollection.supportingDocuments.filter(isNotNullish).map(doc => ({
-      id: doc.id,
-      name: match(doc.statusInfo)
-        .with(
-          { __typename: "SupportingDocumentRefusedStatusInfo" },
-          { __typename: "SupportingDocumentUploadedStatusInfo" },
-          { __typename: "SupportingDocumentValidatedStatusInfo" },
-          ({ filename }) => filename,
-        )
-        .otherwise(() => t("supportingDocument.noFilename")),
-      purpose: doc.supportingDocumentPurpose as SupportingDocumentPurpose,
-    })) ?? [];
-
-  const [currentDocuments, setCurrentDocuments] = useState(documents);
+  const requiredDocumentsPurposes =
+    onboarding?.supportingDocumentCollection.requiredSupportingDocumentPurposes.map(d => d.name) ??
+    [];
 
   const hasOwnershipStep =
-    ["Company", "HomeOwnerAssociation", "Other"].includes(companyType) ||
+    ["Company", "Other"].includes(companyType) ||
     match(onboarding.info)
+      .with(
+        {
+          __typename: "OnboardingCompanyAccountHolderInfo",
+          residencyAddress: { country: "NLD" },
+          companyType: P.union("Association", "HomeOwnerAssociation"),
+        },
+        () => true,
+      )
       .with(
         { __typename: "OnboardingCompanyAccountHolderInfo" },
         info => (info.individualUltimateBeneficialOwners ?? []).length > 0,
       )
+
       .otherwise(() => false);
-  const hasDocumentsStep = requiredDocuments.length > 0;
+  const hasDocumentsStep =
+    onboarding?.supportingDocumentCollection.statusInfo.status === "WaitingForDocument" &&
+    requiredDocumentsPurposes.length > 0;
 
   const [finalized, setFinalized] = useBoolean(false);
 
@@ -294,34 +277,21 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
     [onboardingId, steps, finalized],
   );
 
-  const [updateResult, updateOnboarding] = useUrqlMutation(UpdateCompanyOnboardingDocument);
-
   useEffect(() => {
-    updateOnboarding({
-      input: { onboardingId, language: locale.language },
-      language: locale.language,
-    });
-  }, [onboarding.language, onboardingId, updateOnboarding]);
-
-  if (!updateResult.isDone()) {
-    return <LoadingView color={colors.gray[400]} />;
-  }
+    window.scrollTo(0, 0);
+  }, [route?.name]);
 
   return (
-    <Box style={styles.container}>
-      <OnboardingHeader projectName={projectName} projectLogo={projectLogo} />
-      <Space height={12} />
+    <Box grow={1}>
+      <Box style={styles.sticky}>
+        <OnboardingHeader projectName={projectName} projectLogo={projectLogo} />
 
-      {isStepperDisplayed ? (
-        <ResponsiveContainer>
-          {({ small }) =>
-            small ? (
-              <>
+        {isStepperDisplayed ? (
+          <ResponsiveContainer>
+            {({ small }) =>
+              small ? (
                 <MobileStepTitle activeStepId={route.name} steps={stepperSteps} />
-                <Space height={24} />
-              </>
-            ) : (
-              <>
+              ) : (
                 <Box alignItems="center">
                   <LakeStepper
                     activeStepId={route.name}
@@ -329,11 +299,15 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
                     style={styles.stepper}
                   />
                 </Box>
+              )
+            }
+          </ResponsiveContainer>
+        ) : null}
+      </Box>
 
-                <Space height={48} />
-              </>
-            )
-          }
+      {isStepperDisplayed ? (
+        <ResponsiveContainer>
+          {({ small }) => <Space height={small ? 24 : 48} />}
         </ResponsiveContainer>
       ) : null}
 
@@ -434,11 +408,16 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
               previousStep={getPreviousStep("Documents", steps)}
               nextStep="Finalize"
               onboardingId={params.onboardingId}
-              documents={currentDocuments}
-              onDocumentsChange={setCurrentDocuments}
-              requiredDocumentTypes={requiredDocuments}
-              supportingDocumentCollectionId={onboarding?.supportingDocumentCollection.id ?? ""}
-              onboardingLanguage={onboarding.language ?? "en"}
+              documents={Array.filterMap(
+                onboarding?.supportingDocumentCollection.supportingDocuments ?? [],
+                Option.fromNullable,
+              )}
+              requiredDocumentsPurposes={requiredDocumentsPurposes}
+              supportingDocumentCollectionId={onboarding?.supportingDocumentCollection.id}
+              supportingDocumentCollectionStatus={
+                onboarding?.supportingDocumentCollection.statusInfo.status
+              }
+              templateLanguage={onboarding.language ?? "en"}
             />
           </TrackingProvider>
         ))
@@ -447,9 +426,6 @@ export const OnboardingCompanyWizard = ({ onboarding, onboardingId, holder }: Pr
             <OnboardingCompanyFinalize
               previousStep={getPreviousStep("Finalize", steps)}
               onboardingId={params.onboardingId}
-              legalRepresentativeRecommendedIdentificationLevel={
-                onboarding.legalRepresentativeRecommendedIdentificationLevel
-              }
               steps={steps}
               alreadySubmitted={finalized}
               onSubmitWithErrors={setFinalized.on}
