@@ -1,4 +1,4 @@
-FROM node:22 AS builder
+FROM node:22-bullseye AS builder
 WORKDIR /app
 ADD ./server/ ./
 ENV PNPM_HOME="/pnpm"
