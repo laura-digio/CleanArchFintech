@@ -5,6 +5,7 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 RUN pnpm install --no-frozen-lockfile
+RUN pnpm build
 
 FROM node:22
 WORKDIR /app
