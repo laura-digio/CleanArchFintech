@@ -16,7 +16,7 @@ USER node
 
 COPY --from=builder --chown=node /app/node_modules ./node_modules
 COPY --chown=node:node --from=builder /app/server/dist .
-COPY --from=builder --chown=node /home/node/app/package.json /home/node
+COPY --from=builder --chown=node /app/package.json /home/node
 
 CMD ["dumb-init", "node", "index.js"]
 EXPOSE 8080
