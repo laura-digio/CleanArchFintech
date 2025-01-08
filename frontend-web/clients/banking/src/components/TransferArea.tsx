@@ -194,20 +194,33 @@ export const TransferArea = ({
                             <NotFoundPage />
                           ),
                       )
+                        .with(
+                            { name: "AccountPaymentsBeneficiariesList" },
+                            { name: "AccountPaymentsBeneficiariesDetails" },
+                            ({ params }) =>
+                                canReadTrustedBeneficiary ? (
+                                    <BeneficiaryList
+                                        accountId={accountId}
+                                        accountCountry={accountCountry}
+                                        params={params}
+                                    />
+                                ) : (
+                                    <NotFoundPage />
+                                ),
+                        )
                       .with(
-                        { name: "AccountPaymentsBeneficiariesList" },
-                        { name: "AccountPaymentsBeneficiariesDetails" },
-                        ({ params }) =>
-                          canReadTrustedBeneficiary ? (
-                            <BeneficiaryList
-                              accountId={accountId}
-                              accountCountry={accountCountry}
-                              params={params}
-                            />
-                          ) : (
-                            <NotFoundPage />
-                          ),
+                          {name: "AccountPaymentsPendingDemandsList"},
+                          {name: "AccountPaymentsPendingDemandsDetails"},
+                        () =>
+                            (<></>),
                       )
+                        .with({ name: "AccountPaymentsRoot" }, ({ params }) => (
+                            <TransferList
+                                accountId={accountId}
+                                accountMembershipId={accountMembershipId}
+                                params={params}
+                            />
+                        ))
                       .otherwise(() => (
                         <ErrorView />
                       ))}
