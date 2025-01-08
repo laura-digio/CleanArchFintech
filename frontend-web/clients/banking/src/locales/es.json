@@ -1378,6 +1378,7 @@
   "transfer.tabs.beneficiaries": "Beneficiarios",
   "transfer.tabs.recurringTransfer": "Órdenes permanentes",
   "transfer.tabs.transfers": "Transferencias",
+  "transfer.tabs.pendingDemands": "Solitudes pendientes",
   "transfer.tile.bulkTransfer.subtitle": "Hasta 1000 transferencias SEPA a la vez",
   "transfer.tile.bulkTransfer.title": "Transferencia masiva en euros",
   "transfer.tile.internationalTransfer.subtitle": "Envía dinero en otra moneda distinta del Euro",

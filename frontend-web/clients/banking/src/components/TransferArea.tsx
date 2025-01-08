@@ -99,6 +99,7 @@ export const TransferArea = ({
             { name: "AccountPaymentsRecurringTransferDetailsArea" },
             { name: "AccountPaymentsBeneficiariesList" },
             { name: "AccountPaymentsBeneficiariesDetails" },
+              {name: "AccountPaymentsPendingDemandsList"},
               {name: "AccountPaymentsPendingDemandsDetails"},
             () => (
               <ResponsiveContainer breakpoint={breakpoints.large} style={commonStyles.fill}>
@@ -162,6 +163,10 @@ export const TransferArea = ({
                               },
                             ]
                           : []),
+                        {
+                          label: t("transfer.tabs.pendingDemands"),
+                          url: Router.AccountPaymentsPendingDemandsList({ accountMembershipId }),
+                        },
                       ]}
                     />
 
@@ -235,7 +240,6 @@ export const TransferArea = ({
               <NotFoundPage />
             ),
           )
-            .with({name: "AccountPaymentsPendingDemandsList"}, () => (<>Pending Demands</>))
           .otherwise(() => (
             <NotFoundPage />
           ))}
