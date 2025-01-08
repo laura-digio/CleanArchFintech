@@ -23,6 +23,7 @@ import { Router, paymentRoutes } from "../utils/routes";
 import { BeneficiaryTypePicker } from "./BeneficiaryTypePicker";
 import { Redirect } from "./Redirect";
 import { TransferTypePicker } from "./TransferTypePicker";
+import PendingDemands from "./PendingDemands";
 
 const styles = StyleSheet.create({
   container: {
@@ -199,11 +200,7 @@ export const TransferArea = ({
                         { name: "AccountPaymentsBeneficiariesDetails" },
                         ({ params }) =>
                           canReadTrustedBeneficiary ? (
-                            <BeneficiaryList
-                              accountId={accountId}
-                              accountCountry={accountCountry}
-                              params={params}
-                            />
+                            <PendingDemands />
                           ) : (
                             <NotFoundPage />
                           ),
