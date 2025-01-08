@@ -23,6 +23,7 @@ import { Router, paymentRoutes } from "../utils/routes";
 import { BeneficiaryTypePicker } from "./BeneficiaryTypePicker";
 import { Redirect } from "./Redirect";
 import { TransferTypePicker } from "./TransferTypePicker";
+import PendingDemands from "./PendingDemands";
 
 const styles = StyleSheet.create({
   container: {
@@ -212,7 +213,7 @@ export const TransferArea = ({
                           {name: "AccountPaymentsPendingDemandsList"},
                           {name: "AccountPaymentsPendingDemandsDetails"},
                         () =>
-                            (<></>),
+                            (<PendingDemands />),
                       )
                         .with({ name: "AccountPaymentsRoot" }, ({ params }) => (
                             <TransferList
