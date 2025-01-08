@@ -213,7 +213,7 @@ export const TransferArea = ({
                           {name: "AccountPaymentsPendingDemandsList"},
                           {name: "AccountPaymentsPendingDemandsDetails"},
                         () =>
-                            (<PendingDemands />),
+                            (<PendingDemands accountId={accountId} accountMembershipId={accountMembershipId} />),
                       )
                         .with({ name: "AccountPaymentsRoot" }, ({ params }) => (
                             <TransferList
