@@ -56,6 +56,11 @@ const routes = {
         RecurringTransferList: "/recurring-transfer/list",
         RecurringTransferNew: "/recurring-transfer/new",
 
+        ...createGroup("PendingDemands", "/pending-demands", {
+          List: "/",
+          Details: "/:pendingDemandId",
+        }),
+
         BeneficiariesNew: "/beneficiaries/new?:type{sepa|international}",
 
         // share filters
@@ -153,6 +158,8 @@ export const paymentRoutes = [
   "AccountPaymentsBeneficiariesList",
   "AccountPaymentsBeneficiariesDetails",
   "AccountPaymentsBeneficiariesNew",
+  "AccountPaymentsPendingDemandsList",
+  "AccountPaymentsPendingDemandsDetails",
 ] as const satisfies RouteName[];
 
 export const accountTransactionsRoutes = [

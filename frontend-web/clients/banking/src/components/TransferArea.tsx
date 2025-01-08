@@ -99,6 +99,7 @@ export const TransferArea = ({
             { name: "AccountPaymentsRecurringTransferDetailsArea" },
             { name: "AccountPaymentsBeneficiariesList" },
             { name: "AccountPaymentsBeneficiariesDetails" },
+              {name: "AccountPaymentsPendingDemandsDetails"},
             () => (
               <ResponsiveContainer breakpoint={breakpoints.large} style={commonStyles.fill}>
                 {({ small, large }) => (
@@ -234,6 +235,7 @@ export const TransferArea = ({
               <NotFoundPage />
             ),
           )
+            .with({name: "AccountPaymentsPendingDemandsList"}, () => (<>Pending Demands</>))
           .otherwise(() => (
             <NotFoundPage />
           ))}
