@@ -52,7 +52,7 @@ const columns: ColumnConfig<TransactionDetailsFragment, undefined>[] = [
   {
     id: "label",
     width: "grow",
-    title: t("transactions.transaction"),
+    title: '',
     renderTitle: ({ title }) => <HeaderCell text={title} />,
     renderCell: ({ item }) => (
       <Cell>
