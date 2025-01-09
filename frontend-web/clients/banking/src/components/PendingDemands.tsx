@@ -210,27 +210,18 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
       {({ large }) => (
         <>
           <PlainListView
-            withoutScroll={!large}
-            stickyOffset={0}
             data={data.account.transactions.edges.map(({ node }) => node)}
             keyExtractor={item => item.id}
             headerHeight={48}
-            groupHeaderHeight={48}
+            groupHeaderHeight={0}
             rowHeight={56}
             extraInfo={undefined}
             columns={columns}
             onActiveRowChange={onActiveRowChange}
             activeRowId={activeTransactionId ?? undefined}
-            smallColumns={[]}
+            smallColumns={columns}
             onEndReached={() => {}}
-            getRowLink={({ item }) => (
-              <Pressable
-                onPress={() => {
-                  console.log(item);
-                  setActiveTransactionId(item.id);
-                }}
-              />
-            )}
+            getRowLink={({ item }) => <Pressable onPress={() => setActiveTransactionId(item.id)} />}
             loading={{
               isLoading: false,
               count: 2,
@@ -279,7 +270,6 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
                     <LakeButton
                       size="small"
                       color="current"
-                      icon="arrow-download-filled"
                       loading={false}
                       onPress={() =>
                         handleInitiateTransfer(

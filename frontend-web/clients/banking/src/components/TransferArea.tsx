@@ -21,9 +21,9 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { t } from "../utils/i18n";
 import { Router, paymentRoutes } from "../utils/routes";
 import { BeneficiaryTypePicker } from "./BeneficiaryTypePicker";
+import PendingDemands from "./PendingDemands";
 import { Redirect } from "./Redirect";
 import { TransferTypePicker } from "./TransferTypePicker";
-import PendingDemands from "./PendingDemands";
 
 const styles = StyleSheet.create({
   container: {
@@ -100,8 +100,7 @@ export const TransferArea = ({
             { name: "AccountPaymentsRecurringTransferDetailsArea" },
             { name: "AccountPaymentsBeneficiariesList" },
             { name: "AccountPaymentsBeneficiariesDetails" },
-              {name: "AccountPaymentsPendingDemandsList"},
-              {name: "AccountPaymentsPendingDemandsDetails"},
+            { name: "AccountPaymentsPendingDemandsList" },
             () => (
               <ResponsiveContainer breakpoint={breakpoints.large} style={commonStyles.fill}>
                 {({ small, large }) => (
@@ -195,33 +194,30 @@ export const TransferArea = ({
                             <NotFoundPage />
                           ),
                       )
-                        .with(
-                            { name: "AccountPaymentsBeneficiariesList" },
-                            { name: "AccountPaymentsBeneficiariesDetails" },
-                            ({ params }) =>
-                                canReadTrustedBeneficiary ? (
-                                    <BeneficiaryList
-                                        accountId={accountId}
-                                        accountCountry={accountCountry}
-                                        params={params}
-                                    />
-                                ) : (
-                                    <NotFoundPage />
-                                ),
-                        )
-                      .with(
-                          {name: "AccountPaymentsPendingDemandsList"},
-                          {name: "AccountPaymentsPendingDemandsDetails"},
-                        () =>
-                            (<PendingDemands accountId={accountId} accountMembershipId={accountMembershipId} />),
+                      .with({ name: "AccountPaymentsBeneficiariesList" }, ({ params }) =>
+                        canReadTrustedBeneficiary ? (
+                          <BeneficiaryList
+                            accountId={accountId}
+                            accountCountry={accountCountry}
+                            params={params}
+                          />
+                        ) : (
+                          <NotFoundPage />
+                        ),
                       )
-                        .with({ name: "AccountPaymentsRoot" }, ({ params }) => (
-                            <TransferList
-                                accountId={accountId}
-                                accountMembershipId={accountMembershipId}
-                                params={params}
-                            />
-                        ))
+                      .with({ name: "AccountPaymentsPendingDemandsList" }, () => (
+                        <PendingDemands
+                          accountId={accountId}
+                          accountMembershipId={accountMembershipId}
+                        />
+                      ))
+                      .with({ name: "AccountPaymentsRoot" }, ({ params }) => (
+                        <TransferList
+                          accountId={accountId}
+                          accountMembershipId={accountMembershipId}
+                          params={params}
+                        />
+                      ))
                       .otherwise(() => (
                         <ErrorView />
                       ))}
