@@ -141,7 +141,7 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
     __typename: "Query",
     account: {
       __typename: "Account",
-      id: "d789ef22-3848-49fd-aeb1-bf362e98ab16",
+      id: "bd348fa7-0388-4725-b316-cb3fef9bd664",
       number: "28602927376",
       name: "JoSeBu's Money",
       transactions: {
@@ -171,7 +171,7 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
           {
             __typename: "TransactionEdge",
             node: {
-              id: "bosco_c1207bd934f8dd3c726f7486d4897974",
+              id: "bosco_c1207bd934f8dd3c726f7486d4897975",
               amount: {
                 __typename: "Amount",
                 currency: "EUR",
@@ -187,7 +187,7 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
           {
             __typename: "TransactionEdge",
             node: {
-              id: "bosco_c1207bd934f8dd3c726f7486d4897974",
+              id: "bosco_c1207bd934f8dd3c726f7486d4897976",
               amount: {
                 __typename: "Amount",
                 currency: "EUR",
@@ -223,8 +223,18 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
             activeRowId={activeTransactionId ?? undefined}
             smallColumns={[]}
             onEndReached={() => {}}
-            getRowLink={({ item }) => <Pressable onPress={() => setActiveTransactionId(item.id)} />}
-            loading={true}
+            getRowLink={({ item }) => (
+              <Pressable
+                onPress={() => {
+                  console.log(item);
+                  setActiveTransactionId(item.id);
+                }}
+              />
+            )}
+            loading={{
+              isLoading: false,
+              count: 2,
+            }}
             renderEmptyList={() => (
               <EmptyView
                 borderedIcon={true}
