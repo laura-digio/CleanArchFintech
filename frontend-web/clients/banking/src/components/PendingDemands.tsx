@@ -219,7 +219,7 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
             columns={columns}
             onActiveRowChange={onActiveRowChange}
             activeRowId={activeTransactionId ?? undefined}
-            smallColumns={[]}
+            smallColumns={columns}
             onEndReached={() => {}}
             getRowLink={({ item }) => <Pressable onPress={() => setActiveTransactionId(item.id)} />}
             loading={{
