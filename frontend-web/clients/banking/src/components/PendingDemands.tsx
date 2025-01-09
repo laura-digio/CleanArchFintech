@@ -221,14 +221,7 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
             activeRowId={activeTransactionId ?? undefined}
             smallColumns={[]}
             onEndReached={() => {}}
-            getRowLink={({ item }) => (
-              <Pressable
-                onPress={() => {
-                  console.log(item);
-                  setActiveTransactionId(item.id);
-                }}
-              />
-            )}
+            getRowLink={({ item }) => <Pressable onPress={() => setActiveTransactionId(item.id)} />}
             loading={{
               isLoading: false,
               count: 2,
@@ -277,7 +270,6 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
                     <LakeButton
                       size="small"
                       color="current"
-                      icon="arrow-download-filled"
                       loading={false}
                       onPress={() =>
                         handleInitiateTransfer(
