@@ -210,12 +210,10 @@ export const PendingDemands = ({ accountId, accountMembershipId }) => {
       {({ large }) => (
         <>
           <PlainListView
-            withoutScroll={!large}
-            stickyOffset={0}
             data={data.account.transactions.edges.map(({ node }) => node)}
             keyExtractor={item => item.id}
             headerHeight={48}
-            groupHeaderHeight={48}
+            groupHeaderHeight={0}
             rowHeight={56}
             extraInfo={undefined}
             columns={columns}
